@@ -162,7 +162,6 @@ uint8_t x_tmc2209_read_register(const PersistedFirmwareConfig &config, keyswitch
     }
 
     x_tmc_uart_set_input_mode(config);
-    delay_cycles(bit_cycles * 2U);
 
     uint8_t sync_bytes = 0U;
     while (sync_bytes < 3U)
