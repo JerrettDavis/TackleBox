@@ -1,0 +1,247 @@
+#include "stm32f4xx_hal.h"
+#include "stm32f4xx_hal_rcc.h"
+#include "stm32f4xx_hal_gpio.h"
+#include "usb_debug.h"
+
+extern "C" void SysTick_Handler()
+{
+    HAL_IncTick();
+}
+
+// ============================================================================
+// Early GPIO Setup - Use default HSI clock before PLL
+// ============================================================================
+static void GPIO_Init_Early()
+{
+    __HAL_RCC_GPIOE_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+
+    GPIO_InitTypeDef gpio = {};
+    
+    // PE5 = Debug heartbeat/signaling
+    gpio.Pin = GPIO_PIN_5;
+    gpio.Mode = GPIO_MODE_OUTPUT_PP;
+    gpio.Pull = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOE, &gpio);
+    
+    // X Stepper pins (PE1, PE2, PE3)
+    gpio.Pin = GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3;
+    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(GPIOE, &gpio);
+
+    // X Endstop input (PC1)
+    gpio.Pin = GPIO_PIN_1;
+    gpio.Mode = GPIO_MODE_INPUT;
+    gpio.Pull = GPIO_PULLUP;
+    HAL_GPIO_Init(GPIOC, &gpio);
+
+    // Safe defaults
+    HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, GPIO_PIN_SET);  // Disable motor
+    HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1 | GPIO_PIN_2, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOE, GPIO_PIN_5, GPIO_PIN_RESET);
+}
+
+// ============================================================================
+// System Clock Configuration - Try HSE (8 MHz) with PLL to 168 MHz
+// ============================================================================
+static uint8_t SystemClock_Config_HSE()
+{
+    RCC_OscInitTypeDef osc = {};
+    RCC_ClkInitTypeDef clk = {};
+
+    osc.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+    osc.HSEState = RCC_HSE_ON;
+    osc.PLL.PLLState = RCC_PLL_ON;
+    osc.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+    
+    osc.PLL.PLLM = 8;
+    osc.PLL.PLLN = 336;
+    osc.PLL.PLLP = 2;
+    osc.PLL.PLLQ = 7;
+
+    if (HAL_RCC_OscConfig(&osc) != HAL_OK)
+        return 0;
+
+    clk.ClockType = RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | 
+                    RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+    clk.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+    clk.AHBCLKDivider = RCC_SYSCLK_DIV1;
+    clk.APB1CLKDivider = RCC_HCLK_DIV4;
+    clk.APB2CLKDivider = RCC_HCLK_DIV2;
+
+    if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_5) != HAL_OK)
+        return 0;
+
+    return 1;
+}
+
+// Fallback to HSI if HSE fails
+static void SystemClock_Config_HSI_Safe()
+{
+    RCC_OscInitTypeDef osc = {};
+    RCC_ClkInitTypeDef clk = {};
+
+    osc.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+    osc.HSIState = RCC_HSI_ON;
+    osc.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+    osc.PLL.PLLState = RCC_PLL_NONE;
+
+    HAL_RCC_OscConfig(&osc);
+
+    clk.ClockType = RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK |
+                    RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+    clk.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+    clk.AHBCLKDivider = RCC_SYSCLK_DIV1;
+    clk.APB1CLKDivider = RCC_HCLK_DIV1;
+    clk.APB2CLKDivider = RCC_HCLK_DIV1;
+
+    HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_0);
+}
+
+// ============================================================================
+// Full GPIO Initialization
+// ============================================================================
+static void GPIO_Init()
+{
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    __HAL_RCC_GPIOD_CLK_ENABLE();
+    __HAL_RCC_GPIOE_CLK_ENABLE();
+
+    GPIO_InitTypeDef gpio = {};
+
+    // X Stepper Motor (PE1=DIR, PE2=STEP, PE3=ENABLE)
+    gpio.Mode = GPIO_MODE_OUTPUT_PP;
+    gpio.Pull = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    gpio.Pin = GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3;
+    HAL_GPIO_Init(GPIOE, &gpio);
+
+    // PE5 = Debug/heartbeat
+    gpio.Pin = GPIO_PIN_5;
+    gpio.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOE, &gpio);
+
+    // X Endstop input (PC1)
+    gpio.Mode = GPIO_MODE_INPUT;
+    gpio.Pull = GPIO_PULLUP;
+    gpio.Pin = GPIO_PIN_1;
+    HAL_GPIO_Init(GPIOC, &gpio);
+
+    // Safe defaults
+    HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1 | GPIO_PIN_2, GPIO_PIN_RESET);
+}
+
+// ============================================================================
+// Stepper Control Functions
+// ============================================================================
+static void X_Stepper_Step()
+{
+    HAL_GPIO_WritePin(GPIOE, GPIO_PIN_2, GPIO_PIN_SET);
+    HAL_Delay(1);
+    HAL_GPIO_WritePin(GPIOE, GPIO_PIN_2, GPIO_PIN_RESET);
+    HAL_Delay(5);
+}
+
+static void X_Stepper_SetDirection(uint8_t forward)
+{
+    HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, forward ? GPIO_PIN_SET : GPIO_PIN_RESET);
+}
+
+static void X_Stepper_Enable(uint8_t enable)
+{
+    HAL_GPIO_WritePin(GPIOE, GPIO_PIN_3, enable ? GPIO_PIN_RESET : GPIO_PIN_SET);
+}
+
+static uint8_t X_Endstop_Read()
+{
+    return (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1) == GPIO_PIN_RESET) ? 1 : 0;
+}
+
+// ============================================================================
+// Main Application
+// ============================================================================
+int main()
+{
+    // Set interrupt vector for bootloader offset (32 KiB)
+    SCB->VTOR = FLASH_BASE | 0x8000;
+
+    // Initialize HAL
+    HAL_Init();
+
+    // Early GPIO setup - runs on HSI
+    GPIO_Init_Early();
+    debug_init();
+    
+    // Signal 1: Code is running
+    signal_code_running();
+
+    // Try HSE clock, fallback to HSI if needed
+    uint8_t clock_ok = SystemClock_Config_HSE();
+    
+    if (!clock_ok)
+    {
+        // HSE failed
+        SystemClock_Config_HSI_Safe();
+        signal_hse_failed();  // 1 long pulse = HSE failed
+    }
+
+    // Full GPIO setup
+    GPIO_Init();
+    signal_ready();  // 2 short pulses = ready
+
+    // Enable stepper motor
+    X_Stepper_Enable(1);
+    HAL_Delay(500);
+
+    // ========== MAIN TEST LOOP ==========
+    uint32_t tick_count = 0;
+    uint8_t test_cycle = 0;
+    uint8_t last_endstop_state = 0;
+
+    while (1)
+    {
+        // Heartbeat: toggle PE5 at 1 Hz
+        if ((tick_count % 500) == 0)
+        {
+            HAL_GPIO_TogglePin(GPIOE, GPIO_PIN_5);
+        }
+
+        // Stepper test: every 5 seconds, move 50 steps
+        if ((tick_count % 5000) == 0 && tick_count != 0)
+        {
+            test_cycle++;
+            signal_stepper_test(test_cycle);  // Pulse PE5 N times to show test number
+            
+            uint8_t direction = (test_cycle - 1) % 2;
+            X_Stepper_SetDirection(direction);
+
+            for (int step = 0; step < 50; step++)
+            {
+                X_Stepper_Step();
+            }
+        }
+
+        // Check endstop every 1 second
+        if ((tick_count % 1000) == 0)
+        {
+            uint8_t endstop_pressed = X_Endstop_Read();
+            
+            if (endstop_pressed && !last_endstop_state)
+            {
+                // Endstop just pressed
+                signal_endstop_pressed();  // 5 rapid pulses
+            }
+            
+            last_endstop_state = endstop_pressed;
+        }
+
+        HAL_Delay(10);
+        tick_count += 10;
+    }
+
+    return 0;
+}

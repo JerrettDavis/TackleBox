@@ -1,0 +1,28 @@
+
+This directory contains host-side and firmware-adjacent tests for the keyswitch
+tester firmware.
+
+Current test suites:
+
+- `test_protocol/` for command parsing
+- `test_domain/` for homing and motion state logic
+- `test_integration/` for command-to-domain interaction tests
+
+Run all host tests with:
+
+```powershell
+Set-Location "c:\git\BTT SKR2 Testing"
+& ".\test\run_host_tests.ps1"
+```
+
+These tests intentionally target the extracted `lib/keyswitch_core/` layer so
+the critical behavior can be validated without requiring the SKR2 hardware.
+
+Run live-board serial integration tests with:
+
+```powershell
+Set-Location "c:\git\BTT SKR2 Testing"
+& ".\test\run_live_serial_tests.ps1"
+```
+
+Add `-IncludeMotion` when it is safe to execute `home` and `backoff` against the attached hardware.

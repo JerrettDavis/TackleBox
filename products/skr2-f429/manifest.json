@@ -1,0 +1,44 @@
+{
+  "productId": "skr2-f429",
+  "productName": "TackleBox SKR2 F429 Reference Product",
+  "board": {
+    "vendor": "BigTreeTech",
+    "name": "SKR 2",
+    "mcu": "STM32F429VGT6"
+  },
+  "bootAnchor": {
+    "environment": "skr2_f429_bootloader_cdc",
+    "linkerScript": "STM32F429VGTx_FLASH_BOOTLOADER.ld",
+    "artifactName": "tacklebox-bootanchor-skr2-f429-cdc.bin",
+    "flashBase": "0x08000000",
+    "flashSize": "0x00008000",
+    "transport": "stlink"
+  },
+  "application": {
+    "primaryEnvironment": "skr2_f429_usb",
+    "alternateEnvironments": [
+      "skr2_f429",
+      "skr2_f429_usb_64k",
+      "skr2_f429_usb_0"
+    ],
+    "primaryArtifactName": "tacklebox-keelware-skr2-f429-app.bin",
+    "primaryFlashBase": "0x08008000",
+    "transport": "usb-cdc"
+  },
+  "validation": {
+    "host": "test/run_host_tests.ps1",
+    "ci": "test/run_ci_checks.ps1",
+    "linuxCi": "act -j validate-linux",
+    "bootloaderSerial": "test/run_bootloader_serial_tests.ps1",
+    "runtimeSerial": "test/run_live_serial_tests.ps1"
+  },
+  "wrappers": {
+    "discover": "products/skr2-f429/discover.ps1",
+    "flashApp": "products/skr2-f429/flash-app.ps1",
+    "flashBootAnchor": "products/skr2-f429/flash-bootanchor.ps1",
+    "validateRuntime": "products/skr2-f429/validate-runtime.ps1",
+    "validateBootAnchor": "products/skr2-f429/validate-bootanchor.ps1",
+    "validateAll": "products/skr2-f429/validate-all.ps1",
+    "packageRelease": "products/skr2-f429/package-release.ps1"
+  }
+}

@@ -1,0 +1,44 @@
+#ifndef USB_DEBUG_H
+#define USB_DEBUG_H
+
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * Initialize debug system (uses PE5 GPIO for visual patterns)
+ */
+void debug_init(void);
+
+/**
+ * Signal pattern: code is running (3 short pulses)
+ */
+void signal_code_running(void);
+
+/**
+ * Signal pattern: HSE failed, using HSI (1 long pulse)
+ */
+void signal_hse_failed(void);
+
+/**
+ * Signal pattern: ready to run main loop (2 short pulses)
+ */
+void signal_ready(void);
+
+/**
+ * Signal pattern: stepper test started
+ */
+void signal_stepper_test(uint8_t test_num);
+
+/**
+ * Signal pattern: endstop pressed (multiple rapid blinks)
+ */
+void signal_endstop_pressed(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // USB_DEBUG_H

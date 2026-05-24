@@ -1,0 +1,50 @@
+SKR2 F429 Bring-Up Writeup
+Date: 2026-05-20
+
+1) Initial problem
+- SD bootloader consumed firmware.bin but user firmware appeared dead: no LED, no motion, no USB.
+
+2) Root cause found
+- Linker RAM size was wrong. RAM was set to 256K in custom ld files.
+- STM32F429VGT6 contiguous SRAM at 0x20000000 is 192K.
+- Wrong RAM length set _estack to 0x20040000 (invalid), causing early fault before main().
+
+3) Fix applied
+- Updated linker scripts to 192K RAM for valid stack top:
+  - STM32F429VGTx_FLASH_SKR2.ld
+  - STM32F429VGTx_FLASH_SKR2_0.ld
+  - STM32F429VGTx_FLASH_SKR2_64k.ld
+- Verified vector table stack pointer became 0x20030000.
+
+4) Board-specific power gating learned
+- PC13 (SAFE_POWER_PIN) and PE8 (PS_ON) materially affect board behavior.
+- If asserted, rails and loads can increase power draw and trigger supply OCP.
+
+5) Boot offset confirmation
+- BTT and Klipper references both indicate 32KiB bootloader for SKR2 F429.
+- Working app offset is 0x08008000.
+
+6) Current known-good execution proof
+- PE5 blinking firmware confirmed application is executing from SD-flashed app.
+
+7) Current firmware behavior (this build)
+- Enables power gates needed for stepper operation (PE8 high, PC13 high).
+- Drives X stepper using:
+  - X_DIR = PE1
+  - X_STEP = PE2
+  - X_ENABLE = PE3 (active low)
+- Reads X endstop on PC1 with pull-up.
+- Endstop diagnostics:
+  - Debounced trigger detection.
+  - Backoff after confirmed trigger.
+  - Fault latch and distinct PE5 blink rate if trigger is not seen within travel window.
+
+8) USB status
+- USB DFU enumeration has been inconsistent/not reliable on this board path.
+- For now, SD flashing is the stable workflow.
+- USB/serial data logging is still required and should be added in firmware after endstop polarity/wiring is finalized.
+
+9) Recommended next steps
+- Verify X endstop electrical behavior (NO vs NC) against diagnostic blink states.
+- If needed, invert ENDSTOP_ACTIVE_LOW in src/main.cpp.
+- Add serial telemetry channel for data recording (USB CDC if stable, otherwise UART bridge).

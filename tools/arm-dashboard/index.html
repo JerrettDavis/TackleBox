@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SKR2 Arm Console</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Web Serial Operator Console</p>
+        <h1>SKR2 Arm Console</h1>
+        <p class="hero-copy">Connect directly to the tester board over USB CDC, monitor live telemetry, tune the driver, run motion routines, and orchestrate scripted macros from the browser.</p>
+      </div>
+      <div class="hero-panel">
+        <div class="status-puck-row">
+          <span id="connectionPill" class="pill pill-offline">Disconnected</span>
+          <span id="readerPill" class="pill">Idle</span>
+        </div>
+        <div class="connection-actions">
+          <button id="connectButton" class="primary-button">Connect Serial</button>
+          <button id="disconnectButton" class="secondary-button" disabled>Disconnect</button>
+        </div>
+        <div class="connection-meta">
+          <label>
+            Baud
+            <input id="baudRateInput" type="number" min="9600" step="100" value="115200">
+          </label>
+          <label>
+            Poll every (ms)
+            <input id="pollRateInput" type="number" min="250" step="250" value="1500">
+          </label>
+          <label class="toggle-row">
+            <input id="autoPollToggle" type="checkbox" checked>
+            Auto poll status and driver
+          </label>
+        </div>
+      </div>
+    </header>
+
+    <main class="dashboard-grid">
+      <section class="panel state-panel span-2">
+        <div class="panel-header">
+          <h2>Machine State</h2>
+          <div class="panel-actions">
+            <button data-command="status" class="chip-button command-chip">Status</button>
+            <button data-command="safety" class="chip-button command-chip">Safety</button>
+            <button data-command="driver" class="chip-button command-chip">Driver</button>
+          </div>
+        </div>
+        <div class="telemetry-cards">
+          <article class="telemetry-card accent-sand">
+            <span class="telemetry-label">Position</span>
+            <span id="positionValue" class="telemetry-value">0</span>
+            <span id="targetValue" class="telemetry-footnote">Target 0</span>
+          </article>
+          <article class="telemetry-card accent-blue">
+            <span class="telemetry-label">Home / Hold</span>
+            <span id="homedValue" class="telemetry-value">No</span>
+            <span id="holdValue" class="telemetry-footnote">Hold off</span>
+          </article>
+          <article class="telemetry-card accent-green">
+            <span class="telemetry-label">Force</span>
+            <span id="forceValue" class="telemetry-value">0</span>
+            <span id="loadStateValue" class="telemetry-footnote">Load clear</span>
+          </article>
+          <article class="telemetry-card accent-red">
+            <span class="telemetry-label">Safety</span>
+            <span id="stopSourceValue" class="telemetry-value">None</span>
+            <span id="faultValue" class="telemetry-footnote">Fault 0</span>
+          </article>
+          <article class="telemetry-card accent-purple">
+            <span class="telemetry-label">Routine</span>
+            <span id="cycleRemainingValue" class="telemetry-value">0</span>
+            <span id="cycleDoneValue" class="telemetry-footnote">Done 0</span>
+          </article>
+          <article class="telemetry-card accent-slate">
+            <span class="telemetry-label">Driver</span>
+            <span id="driverCurrentValue" class="telemetry-value">--</span>
+            <span id="driverThresholdValue" class="telemetry-footnote">SG --</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel chart-panel span-2">
+        <div class="panel-header">
+          <h2>Live Telemetry</h2>
+          <div class="panel-actions">
+            <button id="clearChartButton" class="chip-button">Clear chart</button>
+          </div>
+        </div>
+        <canvas id="telemetryChart" width="960" height="320" aria-label="Live force and position chart"></canvas>
+      </section>
+
+      <section class="panel controls-panel">
+        <div class="panel-header">
+          <h2>Motion Controls</h2>
+        </div>
+        <div class="button-grid">
+          <button data-command="home" class="primary-button command-chip">Home</button>
+          <button data-command="backoff" class="secondary-button command-chip">Backoff</button>
+          <button data-command="stop" class="danger-button command-chip">Stop</button>
+          <button data-command="enable" class="secondary-button command-chip">Enable</button>
+          <button data-command="disable" class="secondary-button command-chip">Disable</button>
+          <button data-command="hold on" class="secondary-button command-chip">Hold On</button>
+          <button data-command="hold off" class="secondary-button command-chip">Hold Off</button>
+          <button data-command="setpos 0" class="secondary-button command-chip">Set Pos 0</button>
+        </div>
+        <form id="moveForm" class="stack-form">
+          <label>
+            Absolute move
+            <div class="inline-form-row">
+              <input id="moveAbsoluteInput" type="number" value="20" step="1">
+              <button type="submit" class="primary-button">Send G0</button>
+            </div>
+          </label>
+        </form>
+        <form id="moveRelativeForm" class="stack-form">
+          <label>
+            Relative jog
+            <div class="inline-form-row">
+              <input id="moveRelativeInput" type="number" value="-10" step="1">
+              <button type="submit" class="secondary-button">Jog</button>
+            </div>
+          </label>
+        </form>
+        <form id="routineForm" class="stack-form">
+          <label>
+            Press target
+            <div class="inline-form-row">
+              <input id="pressTargetInput" type="number" value="40" step="1">
+              <button type="button" id="setPressTargetButton" class="secondary-button">Apply</button>
+            </div>
+          </label>
+          <label>
+            Cycle count
+            <div class="inline-form-row">
+              <input id="cycleCountInput" type="number" value="25" min="1" step="1">
+              <button type="button" id="startCycleButton" class="primary-button">Start Cycle</button>
+            </div>
+          </label>
+        </form>
+      </section>
+
+      <section class="panel controls-panel">
+        <div class="panel-header">
+          <h2>Driver & Safety</h2>
+        </div>
+        <form id="driverForm" class="stack-form">
+          <label>
+            Run current (IRUN)
+            <div class="inline-form-row">
+              <input id="irunInput" type="number" min="0" max="31" value="5">
+              <button type="button" id="setIrunButton" class="secondary-button">Apply</button>
+            </div>
+          </label>
+          <label>
+            Hold current (IHOLD)
+            <div class="inline-form-row">
+              <input id="iholdInput" type="number" min="0" max="31" value="0">
+              <button type="button" id="setIholdButton" class="secondary-button">Apply</button>
+            </div>
+          </label>
+          <label>
+            Hold delay
+            <div class="inline-form-row">
+              <input id="iholdDelayInput" type="number" min="0" max="15" value="4">
+              <button type="button" id="setIholdDelayButton" class="secondary-button">Apply</button>
+            </div>
+          </label>
+          <label>
+            Stall threshold
+            <div class="inline-form-row">
+              <input id="sgthrsInput" type="number" min="0" max="255" value="4">
+              <button type="button" id="setSgthrsButton" class="secondary-button">Apply</button>
+            </div>
+          </label>
+        </form>
+        <form id="simulationForm" class="stack-form">
+          <label>
+            Simulated load raw
+            <div class="inline-form-row">
+              <input id="simLoadInput" type="number" min="0" value="1200">
+              <button type="button" id="setSimLoadButton" class="secondary-button">Set</button>
+            </div>
+          </label>
+          <label>
+            Simulated load threshold
+            <div class="inline-form-row">
+              <input id="simThresholdInput" type="number" min="0" value="1000">
+              <button type="button" id="setSimThresholdButton" class="secondary-button">Set</button>
+            </div>
+          </label>
+          <div class="button-grid compact-grid">
+            <button type="button" data-command="simmech on" class="chip-button command-chip">Sim Mech On</button>
+            <button type="button" data-command="simmech off" class="chip-button command-chip">Sim Mech Off</button>
+            <button type="button" data-command="simstall on" class="chip-button command-chip">Sim Stall On</button>
+            <button type="button" data-command="simstall off" class="chip-button command-chip">Sim Stall Off</button>
+            <button type="button" data-command="simclear" class="danger-button command-chip">Clear Simulation</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel macro-panel span-2">
+        <div class="panel-header">
+          <h2>Macro Runner</h2>
+          <div class="panel-actions">
+            <button id="loadRoutinePresetButton" class="chip-button">Load endurance preset</button>
+            <button id="runMacroButton" class="primary-button">Run Macro</button>
+            <button id="stopMacroButton" class="danger-button">Stop Macro</button>
+          </div>
+        </div>
+        <p class="helper-copy">Use one command per line. Prefix delays with <code>DELAY 500</code>. Lines beginning with <code>#</code> are comments.</p>
+        <textarea id="macroEditor" rows="10" spellcheck="false"># Example setup
+driver
+status
+setpos 0
+presspos 40
+cycle 10</textarea>
+      </section>
+
+      <section class="panel log-panel span-2">
+        <div class="panel-header">
+          <h2>Command Console</h2>
+          <div class="panel-actions">
+            <button id="clearLogButton" class="chip-button">Clear log</button>
+          </div>
+        </div>
+        <form id="manualCommandForm" class="console-form">
+          <input id="manualCommandInput" type="text" placeholder="Type a raw command, e.g. g0 x25 or irun 10">
+          <button type="submit" class="primary-button">Send</button>
+        </form>
+        <div id="logOutput" class="log-output" aria-live="polite"></div>
+      </section>
+    </main>
+  </div>
+
+  <template id="logLineTemplate">
+    <div class="log-line">
+      <span class="log-time"></span>
+      <span class="log-kind"></span>
+      <span class="log-message"></span>
+    </div>
+  </template>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

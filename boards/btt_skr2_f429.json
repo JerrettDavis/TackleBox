@@ -1,0 +1,36 @@
+{
+  "build": {
+    "core": "stm32",
+    "cpu": "cortex-m4",
+    "extra_flags": "-DSTM32F429xx",
+    "f_cpu": "168000000L",
+    "mcu": "stm32f429vgt6",
+    "product_line": "STM32F429xx",
+    "variant": "STM32F4xx/F429V(G-I)T_F439V(G-I)T"
+  },
+  "debug": {
+    "default_tools": [
+      "stlink"
+    ],
+    "jlink_device": "STM32F429VG",
+    "openocd_target": "stm32f4x",
+    "svd_path": "STM32F429.svd"
+  },
+  "frameworks": [
+    "stm32cube"
+  ],
+  "name": "BigTreeTech SKR 2 STM32F429VGT6",
+  "upload": {
+    "maximum_ram_size": 262144,
+    "maximum_size": 1015808,
+    "protocol": "stlink",
+    "protocols": [
+      "stlink",
+      "jlink",
+      "blackmagic",
+      "cmsis-dap"
+    ]
+  },
+  "url": "https://github.com/bigtreetech/SKR-2",
+  "vendor": "BigTreeTech"
+}

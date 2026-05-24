@@ -1,0 +1,21 @@
+{
+  "packageFormat": "boatswain-package-v1",
+  "packageType": "config-profile",
+  "packageId": "skr2-safe-low-current",
+  "packageVersion": "1.0.0",
+  "name": "SKR2 Safe Low Current Profile",
+  "description": "Conservative TMC current and threshold settings for early bench validation on the SKR2 reference product.",
+  "targetProduct": "skr2-f429",
+  "targetKeelwareContract": "keelware.stm32.skr2-f429.v1",
+  "commandsFile": "commands.cfg",
+  "persistRecommended": true,
+  "rebootRecommended": false,
+  "validation": {
+    "configPatterns": [
+      "tmc.irun=5",
+      "tmc.ihold=0",
+      "tmc.iholddelay=4",
+      "tmc.sgthrs=4"
+    ]
+  }
+}

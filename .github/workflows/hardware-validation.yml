@@ -1,0 +1,61 @@
+name: Hardware Validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+
+jobs:
+  hardware-validation:
+    runs-on:
+      - self-hosted
+      - windows
+      - keyswitch-hil
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PlatformIO
+        shell: pwsh
+        run: python -m pip install --upgrade pip platformio
+
+      - name: Setup MSYS2 toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+
+      - name: Run host tests and firmware builds
+        shell: pwsh
+        env:
+          KEYSWITCH_GXX: C:\msys64\mingw64\bin\g++.exe
+        run: .\test\run_ci_checks.ps1
+
+      - name: Flash CDC bootloader over ST-Link
+        shell: pwsh
+        run: |
+          python -m platformio run -e skr2_f429_bootloader_cdc -t upload
+
+      - name: Flash application over USB CDC
+        shell: pwsh
+        run: |
+          & '.\tools\flash-over-cdc.ps1' -EnterBootloader -FirmwarePath '.\.pio\build\skr2_f429_usb\firmware.bin' -SkipBuild
+
+      - name: Validate bootloader and runtime USB transitions
+        shell: pwsh
+        run: .\test\run_bootloader_serial_tests.ps1
+
+      - name: Validate runtime serial surface
+        shell: pwsh
+        run: .\test\run_live_serial_tests.ps1

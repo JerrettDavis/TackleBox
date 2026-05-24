@@ -1,0 +1,80 @@
+#include "usb_debug.h"
+#include "stm32f4xx_hal.h"
+
+// ============================================================================
+// GPIO Debug Patterns - All feedback via PE5 LED
+// Watch PE5 with multimeter or logic analyzer to understand what's happening
+// ============================================================================
+
+void debug_init(void)
+{
+    // Already initialized by GPIO_Init_Early(), but ensure PE5 is output
+    __HAL_RCC_GPIOE_CLK_ENABLE();
+    
+    GPIO_InitTypeDef gpio = {};
+    gpio.Pin = GPIO_PIN_5;
+    gpio.Mode = GPIO_MODE_OUTPUT_PP;
+    gpio.Pull = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOE, &gpio);
+    
+    HAL_GPIO_WritePin(GPIOE, GPIO_PIN_5, GPIO_PIN_RESET);
+}
+
+void signal_code_running(void)
+{
+    // Pattern: 3 short pulses (100ms each) = code reached early GPIO
+    for (int i = 0; i < 3; i++) {
+        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_5, GPIO_PIN_SET);
+        HAL_Delay(100);
+        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_5, GPIO_PIN_RESET);
+        HAL_Delay(100);
+    }
+    HAL_Delay(300);  // Pause before next pattern
+}
+
+void signal_hse_failed(void)
+{
+    // Pattern: 1 long pulse (500ms) = HSE startup failed
+    HAL_GPIO_WritePin(GPIOE, GPIO_PIN_5, GPIO_PIN_SET);
+    HAL_Delay(500);
+    HAL_GPIO_WritePin(GPIOE, GPIO_PIN_5, GPIO_PIN_RESET);
+    HAL_Delay(300);
+}
+
+void signal_ready(void)
+{
+    // Pattern: 2 short pulses = ready to run main loop
+    for (int i = 0; i < 2; i++) {
+        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_5, GPIO_PIN_SET);
+        HAL_Delay(100);
+        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_5, GPIO_PIN_RESET);
+        HAL_Delay(100);
+    }
+    HAL_Delay(500);  // Pause before main loop
+}
+
+void signal_stepper_test(uint8_t test_num)
+{
+    // Pattern: N pulses = test cycle number
+    for (uint8_t i = 0; i < test_num; i++) {
+        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_5, GPIO_PIN_SET);
+        HAL_Delay(200);
+        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_5, GPIO_PIN_RESET);
+        HAL_Delay(200);
+    }
+    HAL_Delay(500);
+}
+
+void signal_endstop_pressed(void)
+{
+    // Pattern: Rapid 5 pulses = endstop pressed
+    for (int i = 0; i < 5; i++) {
+        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_5, GPIO_PIN_SET);
+        HAL_Delay(50);
+        HAL_GPIO_WritePin(GPIOE, GPIO_PIN_5, GPIO_PIN_RESET);
+        HAL_Delay(50);
+    }
+}
+
+
