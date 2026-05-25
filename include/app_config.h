@@ -37,6 +37,15 @@ enum class LoadCellSourceKind : uint8_t {
     AnalogAdc = 2,
 };
 
+enum class LoadCellConnectorKind : uint8_t {
+    Custom = 0,
+    Skr2Bltouch = 1,
+    Skr2Det = 2,
+    Skr2Th1 = 3,
+    Skr2Th0 = 4,
+    Skr2Tb = 5,
+};
+
 struct MotionChannelPins {
     PinAssignment uart;
     PinAssignment dir;
@@ -82,7 +91,7 @@ struct LoadCellPins {
 
 struct LoadCellConfig {
     uint8_t source;
-    uint8_t reserved0;
+    uint8_t connector;
     uint16_t reserved1;
     LoadCellPins pins;
     uint32_t threshold;

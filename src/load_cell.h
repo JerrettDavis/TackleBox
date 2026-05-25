@@ -22,5 +22,8 @@ uint8_t load_cell_triggered(const LoadCellRuntime &runtime);
 uint32_t load_cell_raw(const LoadCellRuntime &runtime);
 const char *load_cell_source_name(uint8_t source);
 uint8_t load_cell_source_from_cstr(const char *text, uint8_t *source);
+const char *load_cell_connector_name(uint8_t connector);
+uint8_t load_cell_connector_from_cstr(const char *text, uint8_t *connector);
+void load_cell_apply_connector_profile(LoadCellConfig *config, uint8_t connector);
 
 #endif

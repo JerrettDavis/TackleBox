@@ -249,7 +249,7 @@ Supported `SET` keys:
 - `AXIS.STEPS_PER_ROTATION`, `AXIS.TRAVEL_UM_PER_ROTATION`
 - `AXIS.TRAVEL_MIN_UM`, `AXIS.TRAVEL_MAX_UM`, `AXIS.TRAVEL_LIMIT_UM`, `AXIS.DEFAULT_PRESS_UM`
 - `TELEMETRY.STATUS_INTERVAL_MS`, `TELEMETRY.HEARTBEAT_INTERVAL_MS`
-- `LOADCELL.SOURCE`, `LOADCELL.THRESHOLD`, `SIM.LOAD_THRESHOLD`
+- `LOADCELL.SOURCE`, `LOADCELL.CONNECTOR`, `LOADCELL.THRESHOLD`, `SIM.LOAD_THRESHOLD`
 - `TMC.ALLOW_UNVERIFIED_MOTION`
 - `TMC.IRUN`, `TMC.IHOLD`, `TMC.IHOLDDELAY`, `TMC.TPOWERDOWN`, `TMC.SGTHRS`, `TMC.UART_BIT_US`
 
@@ -265,7 +265,30 @@ For direct indexed access, `CONFIG CHANNELS` lists the current channel inventory
 
 For the current `LOCAL_GPIO` runtime, `CHANNEL.ADDRESS` also feeds the active channel's TMC UART slave address. That makes it possible to probe TMC2209 addresses `0..3` live over USB without rebuilding the firmware.
 
-`LOADCELL.SOURCE` currently accepts `SIMULATION`, `HX711`, and `ADC`. The active runtime still uses the existing simulated force path today, but the persisted config now carries the intended hardware source and placeholder `PIN.LOADCELL_*` wiring so the later load-cell hardware pass can land on a stable schema instead of extending the config model again. `SIM.LOAD_THRESHOLD` remains as a compatibility alias for `LOADCELL.THRESHOLD`.
+`LOADCELL.SOURCE` currently accepts `SIMULATION`, `HX711`, and `ADC`. `LOADCELL.CONNECTOR` provides board-level presets so the operator can choose a physical landing in firmware config instead of manually entering MCU pins every time. Manual `PIN.LOADCELL_*` edits remain available and automatically switch the connector mode back to `CUSTOM`. `SIM.LOAD_THRESHOLD` remains as a compatibility alias for `LOADCELL.THRESHOLD`.
+
+For the current SKR2 reference package, `LOADCELL.CONNECTOR` accepts:
+
+1. `CUSTOM` for manual `PIN.LOADCELL_*` assignment.
+2. `SKR2_BLTOUCH` for the `PE4` + `PE5` BLTouch / servo pair.
+3. `SKR2_DET` for the `PC2` + `PA0` detector / runout pair.
+4. `SKR2_TH1`, `SKR2_TH0`, or `SKR2_TB` for the thermistor-side analog input presets.
+
+Applying a connector preset also applies the matching default source class for that connector family: `SKR2_BLTOUCH` and `SKR2_DET` select `HX711`, while `SKR2_TH1`, `SKR2_TH0`, and `SKR2_TB` select `ADC`.
+
+For the SKR2 reference board, the right connector choice depends on whether "ADC" means a direct board-side analog input or an external load-cell ADC module such as an HX711:
+
+1. For an external HX711-style module, the best connector set is the BLTouch / servo area because it naturally exposes two logic pins plus nearby power. The SKR2 Marlin pin map assigns `Z_MIN_PROBE_PIN` to `PE4` and `SERVO0_PIN` to `PE5`, so that pair is the cleanest digital landing for `DOUT` and `SCK`.
+2. The caveat is that the current bring-up firmware already uses `PE5` as the heartbeat / status LED output. If that indicator must remain intact during load-cell bring-up, the next adequate logic-pin pair is the detector / runout area using `PC2` (`E0DET`) and `PA0` (`E1DET`).
+3. For a direct analog voltage path from an already amplified `0-3.3V` signal, the only board-routed ADC-oriented connectors are the thermistor inputs: `TB` on `PA1`, `TH0` on `PA2`, and `TH1` on `PA3`. Treat those as the analog landing only for a conditioned analog signal path, not as the preferred drop-in path for an external digital load-cell ADC board.
+
+Recommended SKR2 connector order:
+
+1. `PE4` + `PE5` in the BLTouch / servo area for an HX711-style external ADC module, if you are willing to reassign the current `PE5` heartbeat LED.
+2. `PC2` + `PA0` on the detector / runout headers as the fallback digital pair when you want to preserve `PE5`.
+3. `TH1` / `PA3`, then `TH0` / `PA2`, then `TB` / `PA1` only for a true conditioned analog-voltage path.
+
+Do not wire the raw millivolt load-cell bridge directly into any SKR2 header. Use either an external load-cell ADC module such as HX711, or a proper analog front-end that outputs a safe board-compatible voltage.
 
 ## Boot Config Service
 

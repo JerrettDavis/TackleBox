@@ -375,6 +375,7 @@ PersistedFirmwareConfig make_default_persisted_config(void)
     config.pins.safePower = {(uint8_t)GpioPortId::C, 13U};
     config.pins.led = {(uint8_t)GpioPortId::E, 5U};
     config.loadCell.source = (uint8_t)LoadCellSourceKind::Simulation;
+    config.loadCell.connector = (uint8_t)LoadCellConnectorKind::Custom;
     config.loadCell.pins.data = {0U, 0U};
     config.loadCell.pins.clock = {0U, 0U};
     config.loadCell.threshold = 1000U;
@@ -439,7 +440,10 @@ uint8_t persisted_config_valid(const PersistedFirmwareConfig &config)
            pin_assignment_valid(config.pins.safePower) &&
            pin_assignment_valid(config.pins.led) &&
                      (config.loadCell.source <= (uint8_t)LoadCellSourceKind::AnalogAdc) &&
+                     (config.loadCell.connector <= (uint8_t)LoadCellConnectorKind::Skr2Tb) &&
                      (config.loadCell.threshold > 0U) &&
+                     (((config.loadCell.source != (uint8_t)LoadCellSourceKind::AnalogAdc) ||
+                         pin_assignment_valid(config.loadCell.pins.data))) &&
                      (((config.loadCell.source != (uint8_t)LoadCellSourceKind::Hx711) ||
                          (pin_assignment_valid(config.loadCell.pins.data) && pin_assignment_valid(config.loadCell.pins.clock)))) &&
            axis_workspace_valid(config) &&
@@ -630,8 +634,9 @@ void emit_config_summary(const PersistedFirmwareConfig &config, const ConfigRunt
     len = snprintf(
         line,
         sizeof(line),
-        "config loadcell.source=%s loadcell.threshold=%lu pin.loadcell_data=%s pin.loadcell_clock=%s\r\n",
+        "config loadcell.source=%s loadcell.connector=%s loadcell.threshold=%lu pin.loadcell_data=%s pin.loadcell_clock=%s\r\n",
         load_cell_source_name(config.loadCell.source),
+        load_cell_connector_name(config.loadCell.connector),
         (unsigned long)config.loadCell.threshold,
         a,
         b);

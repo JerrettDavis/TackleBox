@@ -1,4 +1,5 @@
 #include <stdexcept>
+#include <string>
 
 #include "load_cell.h"
 
@@ -72,6 +73,31 @@ void test_load_cell_source_names_and_parsing(void)
     if (load_cell_source_from_cstr("NOPE", &source) != 0U) throw std::runtime_error("unknown source should not parse");
 }
 
+void test_load_cell_connector_names_and_profiles(void)
+{
+    uint8_t connector = 0U;
+    LoadCellConfig config = {};
+
+    if (!load_cell_connector_from_cstr("BLTOUCH", &connector)) throw std::runtime_error("BLTouch connector should parse");
+    if (connector != (uint8_t)LoadCellConnectorKind::Skr2Bltouch) throw std::runtime_error("BLTouch connector should parse to Skr2Bltouch");
+    if (std::string(load_cell_connector_name(connector)) != "skr2_bltouch") throw std::runtime_error("BLTouch connector should format as skr2_bltouch");
+    load_cell_apply_connector_profile(&config, connector);
+    if (config.source != (uint8_t)LoadCellSourceKind::Hx711) throw std::runtime_error("BLTouch connector should select HX711 source");
+    if ((config.pins.data.portId != (uint8_t)GpioPortId::E) || (config.pins.data.pin != 4U)) throw std::runtime_error("BLTouch connector should map data to PE4");
+    if ((config.pins.clock.portId != (uint8_t)GpioPortId::E) || (config.pins.clock.pin != 5U)) throw std::runtime_error("BLTouch connector should map clock to PE5");
+
+    if (!load_cell_connector_from_cstr("TH1", &connector)) throw std::runtime_error("TH1 connector should parse");
+    if (connector != (uint8_t)LoadCellConnectorKind::Skr2Th1) throw std::runtime_error("TH1 connector should parse to Skr2Th1");
+    load_cell_apply_connector_profile(&config, connector);
+    if (config.source != (uint8_t)LoadCellSourceKind::AnalogAdc) throw std::runtime_error("TH1 connector should select analog ADC source");
+    if ((config.pins.data.portId != (uint8_t)GpioPortId::A) || (config.pins.data.pin != 3U)) throw std::runtime_error("TH1 connector should map data to PA3");
+    if ((config.pins.clock.portId != 0U) || (config.pins.clock.pin != 0U)) throw std::runtime_error("TH1 connector should clear the clock pin");
+
+    if (!load_cell_connector_from_cstr("CUSTOM", &connector)) throw std::runtime_error("custom connector should parse");
+    if (std::string(load_cell_connector_name(connector)) != "custom") throw std::runtime_error("custom connector should format as custom");
+    if (load_cell_connector_from_cstr("NOPE", &connector) != 0U) throw std::runtime_error("unknown connector should not parse");
+}
+
 int main()
 {
     test_load_cell_defaults_to_zero_raw_and_configured_threshold();
@@ -79,5 +105,6 @@ int main()
     test_load_cell_clear_preserves_threshold_and_clears_overrides();
     test_load_cell_raw_accessor_tracks_updates();
     test_load_cell_source_names_and_parsing();
+    test_load_cell_connector_names_and_profiles();
     return 0;
 }

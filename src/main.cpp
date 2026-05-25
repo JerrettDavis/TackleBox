@@ -247,6 +247,11 @@ static const char *load_cell_source_name_local(uint8_t source)
     return load_cell_source_name(source);
 }
 
+static const char *load_cell_connector_name_local(uint8_t connector)
+{
+    return load_cell_connector_name(connector);
+}
+
 static void emit_channel_inventory_line(const PersistedFirmwareConfig &config, uint8_t index)
 {
     const MotionChannelConfig &channel = motion_channel(config, index);
@@ -347,8 +352,9 @@ static void emit_indexed_channel_summary(const PersistedFirmwareConfig &config, 
     len = snprintf(
         line,
         sizeof(line),
-        "config loadcell.source=%s loadcell.threshold=%lu pin.loadcell_data=%s pin.loadcell_clock=%s\r\n",
+        "config loadcell.source=%s loadcell.connector=%s loadcell.threshold=%lu pin.loadcell_data=%s pin.loadcell_clock=%s\r\n",
         load_cell_source_name_local(config.loadCell.source),
+        load_cell_connector_name_local(config.loadCell.connector),
         (unsigned long)config.loadCell.threshold,
         a,
         b);
@@ -830,12 +836,14 @@ static ApplyConfigResult apply_config_key_value(
     else if (same_text_case_sensitive(key, "PIN.LOADCELL_DATA") && parse_pin_assignment(value, &pin))
     {
         config->loadCell.pins.data = pin;
+        config->loadCell.connector = (uint8_t)LoadCellConnectorKind::Custom;
         result.accepted = 1U;
         result.rebootRequired = 1U;
     }
     else if (same_text_case_sensitive(key, "PIN.LOADCELL_CLOCK") && parse_pin_assignment(value, &pin))
     {
         config->loadCell.pins.clock = pin;
+        config->loadCell.connector = (uint8_t)LoadCellConnectorKind::Custom;
         result.accepted = 1U;
         result.rebootRequired = 1U;
     }
@@ -901,6 +909,16 @@ static ApplyConfigResult apply_config_key_value(
         config->loadCell.source = enum_value;
         result.accepted = 1U;
         result.rebootRequired = 1U;
+    }
+    else if (same_text_case_sensitive(key, "LOADCELL.CONNECTOR") && load_cell_connector_from_cstr(value, &enum_value))
+    {
+        load_cell_apply_connector_profile(&config->loadCell, enum_value);
+        result.accepted = 1U;
+        result.rebootRequired = 1U;
+        if (apply_live != 0U)
+        {
+            load_cell_set_threshold(&g_load_cell, config->loadCell.threshold);
+        }
     }
     else if ((same_text_case_sensitive(key, "LOADCELL.THRESHOLD") || same_text_case_sensitive(key, "SIM.LOAD_THRESHOLD")) && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 > 0U))
     {
