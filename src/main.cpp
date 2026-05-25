@@ -242,6 +242,11 @@ static const char *channel_transport_name_local(uint8_t kind)
     }
 }
 
+static const char *load_cell_source_name_local(uint8_t source)
+{
+    return load_cell_source_name(source);
+}
+
 static void emit_channel_inventory_line(const PersistedFirmwareConfig &config, uint8_t index)
 {
     const MotionChannelConfig &channel = motion_channel(config, index);
@@ -337,6 +342,21 @@ static void emit_indexed_channel_summary(const PersistedFirmwareConfig &config, 
         usb_cdc_bridge_write(line, (uint16_t)len);
     }
 
+    format_pin_assignment(config.loadCell.pins.data, a, sizeof(a));
+    format_pin_assignment(config.loadCell.pins.clock, b, sizeof(b));
+    len = snprintf(
+        line,
+        sizeof(line),
+        "config loadcell.source=%s loadcell.threshold=%lu pin.loadcell_data=%s pin.loadcell_clock=%s\r\n",
+        load_cell_source_name_local(config.loadCell.source),
+        (unsigned long)config.loadCell.threshold,
+        a,
+        b);
+    if (len > 0)
+    {
+        usb_cdc_bridge_write(line, (uint16_t)len);
+    }
+
     len = snprintf(
         line,
         sizeof(line),
@@ -387,7 +407,7 @@ static void emit_indexed_channel_summary(const PersistedFirmwareConfig &config, 
         (unsigned long)config.statusIntervalMs,
         (unsigned long)config.heartbeatIntervalMs,
         (unsigned long)config.bootHostWaitMs,
-        (unsigned long)config.simLoadThreshold,
+        (unsigned long)config.loadCell.threshold,
         (unsigned long)config.allowUnverifiedTmcMotion);
     if (len > 0)
     {
@@ -807,6 +827,18 @@ static ApplyConfigResult apply_config_key_value(
         result.accepted = 1U;
         result.rebootRequired = 1U;
     }
+    else if (same_text_case_sensitive(key, "PIN.LOADCELL_DATA") && parse_pin_assignment(value, &pin))
+    {
+        config->loadCell.pins.data = pin;
+        result.accepted = 1U;
+        result.rebootRequired = 1U;
+    }
+    else if (same_text_case_sensitive(key, "PIN.LOADCELL_CLOCK") && parse_pin_assignment(value, &pin))
+    {
+        config->loadCell.pins.clock = pin;
+        result.accepted = 1U;
+        result.rebootRequired = 1U;
+    }
     else if (same_text_case_sensitive(key, "LOGIC.STOP_ACTIVE_HIGH") && parse_bool_cstr(value, &bool_value))
     {
         channel.stopSignalActiveHigh = bool_value;
@@ -863,6 +895,21 @@ static ApplyConfigResult apply_config_key_value(
     {
         config->allowUnverifiedTmcMotion = bool_value;
         result.accepted = 1U;
+    }
+    else if (same_text_case_sensitive(key, "LOADCELL.SOURCE") && load_cell_source_from_cstr(value, &enum_value))
+    {
+        config->loadCell.source = enum_value;
+        result.accepted = 1U;
+        result.rebootRequired = 1U;
+    }
+    else if ((same_text_case_sensitive(key, "LOADCELL.THRESHOLD") || same_text_case_sensitive(key, "SIM.LOAD_THRESHOLD")) && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 > 0U))
+    {
+        config->loadCell.threshold = parsed_u32;
+        result.accepted = 1U;
+        if (apply_live != 0U)
+        {
+            load_cell_set_threshold(&g_load_cell, parsed_u32);
+        }
     }
     else if (same_text_case_sensitive(key, "MOTION.SEEK_LIMIT_STEPS") && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 > 0U))
     {
@@ -1028,15 +1075,6 @@ static ApplyConfigResult apply_config_key_value(
         if ((apply_live != 0U) && (motion_config != 0))
         {
             motion_config->heartbeatIntervalMs = parsed_u32;
-        }
-    }
-    else if (same_text_case_sensitive(key, "SIM.LOAD_THRESHOLD") && parse_u32_cstr(value, &parsed_u32))
-    {
-        config->simLoadThreshold = parsed_u32;
-        result.accepted = 1U;
-        if (apply_live != 0U)
-        {
-            load_cell_set_threshold(&g_load_cell, parsed_u32);
         }
     }
     else if (same_text_case_sensitive(key, "TMC.UART_BIT_US") && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 > 0U))
@@ -1290,7 +1328,7 @@ int main()
 
     g_config_state = select_boot_config(&g_persisted_config, apply_boot_config_key_value);
 
-    load_cell_set_threshold(&g_load_cell, g_persisted_config.simLoadThreshold);
+    load_cell_set_threshold(&g_load_cell, g_persisted_config.loadCell.threshold);
     tmc_driver_runtime().tmc2209 = current_motion_channel_const().tmc2209;
 
     enable_gpio_clocks_for_config(g_persisted_config);
@@ -1711,7 +1749,7 @@ int main()
             {
                 char line[72];
                 load_cell_set_threshold(&g_load_cell, (uint32_t)command.value);
-                g_persisted_config.simLoadThreshold = g_load_cell.threshold;
+                g_persisted_config.loadCell.threshold = g_load_cell.threshold;
                 g_config_state.dirty = 1U;
                 int len = snprintf(line, sizeof(line), "cmd: simthresh thresh=%lu\r\n", (unsigned long)g_load_cell.threshold);
                 if (len > 0)

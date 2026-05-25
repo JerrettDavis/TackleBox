@@ -241,6 +241,7 @@ Supported `SET` keys:
 - `CHANNEL.TRANSPORT`, `CHANNEL.BUS_INDEX`, `CHANNEL.ADDRESS`
 - `PIN.X_UART`, `PIN.X_DIR`, `PIN.X_STEP`, `PIN.X_ENABLE`, `PIN.X_STOP`
 - `PIN.DIAG0`, `PIN.DIAG2`, `PIN.PS_ON`, `PIN.SAFE_POWER`, `PIN.LED`
+- `PIN.LOADCELL_DATA`, `PIN.LOADCELL_CLOCK`
 - `LOGIC.STOP_ACTIVE_HIGH`, `LOGIC.DIR_INVERTED`, `LOGIC.ENABLE_ACTIVE_LOW`, `LOGIC.HOME_TOWARDS_POSITIVE`
 - `BOOT.HOST_WAIT_MS`
 - `MOTION.STEP_INTERVAL_US`, `MOTION.HOME_FEEDRATE_MM_PER_MIN`, `MOTION.MOVE_FEEDRATE_MM_PER_MIN`, `MOTION.STEP_PULSE_US`, `MOTION.SEEK_LIMIT_STEPS`
@@ -248,7 +249,7 @@ Supported `SET` keys:
 - `AXIS.STEPS_PER_ROTATION`, `AXIS.TRAVEL_UM_PER_ROTATION`
 - `AXIS.TRAVEL_MIN_UM`, `AXIS.TRAVEL_MAX_UM`, `AXIS.TRAVEL_LIMIT_UM`, `AXIS.DEFAULT_PRESS_UM`
 - `TELEMETRY.STATUS_INTERVAL_MS`, `TELEMETRY.HEARTBEAT_INTERVAL_MS`
-- `SIM.LOAD_THRESHOLD`
+- `LOADCELL.SOURCE`, `LOADCELL.THRESHOLD`, `SIM.LOAD_THRESHOLD`
 - `TMC.ALLOW_UNVERIFIED_MOTION`
 - `TMC.IRUN`, `TMC.IHOLD`, `TMC.IHOLDDELAY`, `TMC.TPOWERDOWN`, `TMC.SGTHRS`, `TMC.UART_BIT_US`
 
@@ -263,6 +264,8 @@ For direct indexed access, `CONFIG CHANNELS` lists the current channel inventory
 `CHANNEL.TRANSPORT` currently accepts `LOCAL_GPIO`, `REMOTE_BUS`, and `VIRTUAL`. The current runtime can only execute a `LOCAL_GPIO` active channel; the other transport types exist so the software layer can model future remote MCU and virtual channels without redesigning the config schema again.
 
 For the current `LOCAL_GPIO` runtime, `CHANNEL.ADDRESS` also feeds the active channel's TMC UART slave address. That makes it possible to probe TMC2209 addresses `0..3` live over USB without rebuilding the firmware.
+
+`LOADCELL.SOURCE` currently accepts `SIMULATION`, `HX711`, and `ADC`. The active runtime still uses the existing simulated force path today, but the persisted config now carries the intended hardware source and placeholder `PIN.LOADCELL_*` wiring so the later load-cell hardware pass can land on a stable schema instead of extending the config model again. `SIM.LOAD_THRESHOLD` remains as a compatibility alias for `LOADCELL.THRESHOLD`.
 
 ## Boot Config Service
 
@@ -632,7 +635,7 @@ Keyswitch tester targets:
 
 The firmware shell now has explicit placeholders for the next two hardware integrations:
 
-1. `src/load_cell.cpp` and the `read_load_cell_triggered()` / `read_load_cell_raw()` seam in `src/main.cpp` for HX711 or ADC-based force acquisition.
+1. `src/load_cell.cpp` plus `LOADCELL.SOURCE`, `LOADCELL.THRESHOLD`, `PIN.LOADCELL_DATA`, and `PIN.LOADCELL_CLOCK` for HX711 or ADC-based force acquisition.
 2. `read_stallguard_triggered()` in `src/main.cpp` for TMC2209 DIAG or UART-driven stall reporting.
 3. `read_mechanical_fallback_triggered()` in `src/main.cpp` for combining the configured `x_stop` signal with simulated or future alternate fallback sources.
 

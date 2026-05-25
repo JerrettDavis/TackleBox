@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "app_config.h"
+
 struct LoadCellRuntime {
     uint32_t raw;
     uint32_t threshold;
@@ -18,5 +20,7 @@ void load_cell_set_stall_override(LoadCellRuntime *runtime, uint8_t enabled);
 void load_cell_clear(LoadCellRuntime *runtime);
 uint8_t load_cell_triggered(const LoadCellRuntime &runtime);
 uint32_t load_cell_raw(const LoadCellRuntime &runtime);
+const char *load_cell_source_name(uint8_t source);
+uint8_t load_cell_source_from_cstr(const char *text, uint8_t *source);
 
 #endif

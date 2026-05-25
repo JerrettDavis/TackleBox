@@ -1,5 +1,7 @@
 #include "load_cell.h"
 
+#include <string.h>
+
 LoadCellRuntime load_cell_make_default(uint32_t threshold)
 {
     LoadCellRuntime runtime = {};
@@ -67,4 +69,40 @@ uint8_t load_cell_triggered(const LoadCellRuntime &runtime)
 uint32_t load_cell_raw(const LoadCellRuntime &runtime)
 {
     return runtime.raw;
+}
+
+const char *load_cell_source_name(uint8_t source)
+{
+    switch ((LoadCellSourceKind)source)
+    {
+    case LoadCellSourceKind::Hx711: return "hx711";
+    case LoadCellSourceKind::AnalogAdc: return "adc";
+    default: return "simulation";
+    }
+}
+
+uint8_t load_cell_source_from_cstr(const char *text, uint8_t *source)
+{
+    if ((text == 0) || (source == 0))
+    {
+        return 0U;
+    }
+
+    if ((strcmp(text, "SIM") == 0) || (strcmp(text, "SIMULATION") == 0))
+    {
+        *source = (uint8_t)LoadCellSourceKind::Simulation;
+        return 1U;
+    }
+    if (strcmp(text, "HX711") == 0)
+    {
+        *source = (uint8_t)LoadCellSourceKind::Hx711;
+        return 1U;
+    }
+    if ((strcmp(text, "ADC") == 0) || (strcmp(text, "ANALOG_ADC") == 0))
+    {
+        *source = (uint8_t)LoadCellSourceKind::AnalogAdc;
+        return 1U;
+    }
+
+    return 0U;
 }

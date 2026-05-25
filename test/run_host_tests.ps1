@@ -28,6 +28,7 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
 $commonArgs = @(
     '-std=gnu++17',
+    '-I', (Join-Path $root 'include'),
     '-I', (Join-Path $root 'lib\keyswitch_core\include'),
     '-I', (Join-Path $root 'src')
 )

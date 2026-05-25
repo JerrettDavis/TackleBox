@@ -3,6 +3,7 @@
 #include "app_board.h"
 #include "boot_mode.h"
 #include "keyswitch_protocol.h"
+#include "load_cell.h"
 #include "sdcard_fatfs.h"
 #include "usb_cdc_bridge.h"
 #include "usbd_cdc_if.h"
@@ -18,7 +19,7 @@ namespace {
 
 const uint32_t CONFIG_FLASH_ADDRESS = 0x080E0000UL;
 const uint32_t CONFIG_MAGIC = 0x4B535743UL;
-const uint16_t CONFIG_VERSION = 8U;
+const uint16_t CONFIG_VERSION = 9U;
 
 uint8_t axis_workspace_valid(const PersistedFirmwareConfig &config)
 {
@@ -373,6 +374,10 @@ PersistedFirmwareConfig make_default_persisted_config(void)
     config.pins.psOn = {(uint8_t)GpioPortId::E, 8U};
     config.pins.safePower = {(uint8_t)GpioPortId::C, 13U};
     config.pins.led = {(uint8_t)GpioPortId::E, 5U};
+    config.loadCell.source = (uint8_t)LoadCellSourceKind::Simulation;
+    config.loadCell.pins.data = {0U, 0U};
+    config.loadCell.pins.clock = {0U, 0U};
+    config.loadCell.threshold = 1000U;
     config.stopDebounceCount = 3U;
     config.backoffSteps = 600U;
     config.stepIntervalUs = 250U;
@@ -382,7 +387,6 @@ PersistedFirmwareConfig make_default_persisted_config(void)
     config.statusIntervalMs = 1000U;
     config.heartbeatIntervalMs = 1000U;
     config.bootHostWaitMs = 4000U;
-    config.simLoadThreshold = 1000U;
     for (uint8_t index = 0U; index < MOTION_CHANNEL_CAPACITY; ++index)
     {
         config.motionChannels[index].seekStepLimit = axis_steps_from_um(config, config.motionChannels[index].travelLimitUm);
@@ -434,6 +438,10 @@ uint8_t persisted_config_valid(const PersistedFirmwareConfig &config)
            pin_assignment_valid(config.pins.psOn) &&
            pin_assignment_valid(config.pins.safePower) &&
            pin_assignment_valid(config.pins.led) &&
+                     (config.loadCell.source <= (uint8_t)LoadCellSourceKind::AnalogAdc) &&
+                     (config.loadCell.threshold > 0U) &&
+                     (((config.loadCell.source != (uint8_t)LoadCellSourceKind::Hx711) ||
+                         (pin_assignment_valid(config.loadCell.pins.data) && pin_assignment_valid(config.loadCell.pins.clock)))) &&
            axis_workspace_valid(config) &&
            (config.stopDebounceCount > 0U) &&
            (config.backoffSteps > 0U) &&
@@ -617,6 +625,21 @@ void emit_config_summary(const PersistedFirmwareConfig &config, const ConfigRunt
         usb_cdc_bridge_write(line, (uint16_t)len);
     }
 
+    format_pin_assignment(config.loadCell.pins.data, a, sizeof(a));
+    format_pin_assignment(config.loadCell.pins.clock, b, sizeof(b));
+    len = snprintf(
+        line,
+        sizeof(line),
+        "config loadcell.source=%s loadcell.threshold=%lu pin.loadcell_data=%s pin.loadcell_clock=%s\r\n",
+        load_cell_source_name(config.loadCell.source),
+        (unsigned long)config.loadCell.threshold,
+        a,
+        b);
+    if (len > 0)
+    {
+        usb_cdc_bridge_write(line, (uint16_t)len);
+    }
+
     len = snprintf(
         line,
         sizeof(line),
@@ -667,7 +690,7 @@ void emit_config_summary(const PersistedFirmwareConfig &config, const ConfigRunt
         (unsigned long)config.statusIntervalMs,
         (unsigned long)config.heartbeatIntervalMs,
         (unsigned long)config.bootHostWaitMs,
-        (unsigned long)config.simLoadThreshold,
+        (unsigned long)config.loadCell.threshold,
         (unsigned long)config.allowUnverifiedTmcMotion);
     if (len > 0)
     {

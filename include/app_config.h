@@ -31,6 +31,12 @@ enum class MotionChannelTransportKind : uint8_t {
     Virtual = 2,
 };
 
+enum class LoadCellSourceKind : uint8_t {
+    Simulation = 0,
+    Hx711 = 1,
+    AnalogAdc = 2,
+};
+
 struct MotionChannelPins {
     PinAssignment uart;
     PinAssignment dir;
@@ -69,6 +75,19 @@ struct SharedRuntimePins {
     PinAssignment led;
 };
 
+struct LoadCellPins {
+    PinAssignment data;
+    PinAssignment clock;
+};
+
+struct LoadCellConfig {
+    uint8_t source;
+    uint8_t reserved0;
+    uint16_t reserved1;
+    LoadCellPins pins;
+    uint32_t threshold;
+};
+
 struct PersistedFirmwareConfig {
     uint8_t motionChannelCount;
     uint8_t activeMotionChannel;
@@ -76,6 +95,7 @@ struct PersistedFirmwareConfig {
     uint8_t reserved0;
     MotionChannelConfig motionChannels[MOTION_CHANNEL_CAPACITY];
     SharedRuntimePins pins;
+    LoadCellConfig loadCell;
     uint16_t stopDebounceCount;
     uint16_t backoffSteps;
     uint16_t stepIntervalUs;
@@ -84,7 +104,6 @@ struct PersistedFirmwareConfig {
     uint32_t statusIntervalMs;
     uint32_t heartbeatIntervalMs;
     uint32_t bootHostWaitMs;
-    uint32_t simLoadThreshold;
 };
 
 inline uint8_t motion_channel_index_valid(uint8_t index)
