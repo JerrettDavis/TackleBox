@@ -120,6 +120,44 @@ function Get-AllowUnverifiedMotion {
     return [int]$match.Groups[1].Value
 }
 
+function Assert-LoadCellConfig {
+    param(
+        [string[]]$Lines,
+        [string]$ExpectedSource,
+        [string]$ExpectedConnector,
+        [string]$ExpectedDataPin,
+        [string]$ExpectedClockPin,
+        [int]$ExpectedThreshold
+    )
+
+    $configLine = $Lines | Where-Object { $_ -match '^config loadcell\.source=' } | Select-Object -Last 1
+    if (-not $configLine) {
+        throw "Load-cell config line missing.`nObserved lines:`n" + ($Lines -join "`n")
+    }
+
+    $pattern = '^config loadcell\.source=([^ ]+) loadcell\.connector=([^ ]+) loadcell\.threshold=(\d+) pin\.loadcell_data=([^ ]+) pin\.loadcell_clock=([^ ]+)$'
+    $match = [regex]::Match($configLine, $pattern)
+    if (-not $match.Success) {
+        throw "Load-cell config line was not parseable.`nObserved line:`n$configLine"
+    }
+
+    if ($match.Groups[1].Value -ne $ExpectedSource) {
+        throw "Unexpected load-cell source. Expected '$ExpectedSource', observed '$($match.Groups[1].Value)'."
+    }
+    if ($match.Groups[2].Value -ne $ExpectedConnector) {
+        throw "Unexpected load-cell connector. Expected '$ExpectedConnector', observed '$($match.Groups[2].Value)'."
+    }
+    if ([int]$match.Groups[3].Value -ne $ExpectedThreshold) {
+        throw "Unexpected load-cell threshold. Expected '$ExpectedThreshold', observed '$($match.Groups[3].Value)'."
+    }
+    if ($match.Groups[4].Value -ne $ExpectedDataPin) {
+        throw "Unexpected load-cell data pin. Expected '$ExpectedDataPin', observed '$($match.Groups[4].Value)'."
+    }
+    if ($match.Groups[5].Value -ne $ExpectedClockPin) {
+        throw "Unexpected load-cell clock pin. Expected '$ExpectedClockPin', observed '$($match.Groups[5].Value)'."
+    }
+}
+
 function Invoke-CommandCheck {
     param(
         [System.IO.Ports.SerialPort]$Port,
@@ -272,6 +310,39 @@ try {
         '^cmd: set key=SIM.LOAD_THRESHOLD value=1000 ok=1 reboot=0$'
     )
 
+    $setLoadCellDetLines = Invoke-CommandCheck -Port $port -Command 'set loadcell.connector skr2_det' -ReadMs 1500 -ExpectedPatterns @(
+        '^cmd: set key=LOADCELL.CONNECTOR value=SKR2_DET ok=1 reboot=1$'
+    )
+    $configLoadCellDetLines = Invoke-CommandCheck -Port $port -Command 'config' -ReadMs 1500 -ExpectedPatterns @(
+        '^cmd: config$',
+        '^config loadcell\.source=hx711 loadcell\.connector=skr2_det loadcell\.threshold=1000 pin\.loadcell_data=PC2 pin\.loadcell_clock=PA0$'
+    )
+    Assert-LoadCellConfig -Lines $configLoadCellDetLines -ExpectedSource 'hx711' -ExpectedConnector 'skr2_det' -ExpectedDataPin 'PC2' -ExpectedClockPin 'PA0' -ExpectedThreshold 1000
+
+    $setLoadCellTh1Lines = Invoke-CommandCheck -Port $port -Command 'set loadcell.connector skr2_th1' -ReadMs 1500 -ExpectedPatterns @(
+        '^cmd: set key=LOADCELL.CONNECTOR value=SKR2_TH1 ok=1 reboot=1$'
+    )
+    $configLoadCellTh1Lines = Invoke-CommandCheck -Port $port -Command 'config' -ReadMs 1500 -ExpectedPatterns @(
+        '^cmd: config$',
+        '^config loadcell\.source=adc loadcell\.connector=skr2_th1 loadcell\.threshold=1000 pin\.loadcell_data=PA3 pin\.loadcell_clock=P\?0$'
+    )
+    Assert-LoadCellConfig -Lines $configLoadCellTh1Lines -ExpectedSource 'adc' -ExpectedConnector 'skr2_th1' -ExpectedDataPin 'PA3' -ExpectedClockPin 'P?0' -ExpectedThreshold 1000
+
+    $setLoadCellSourceLines = Invoke-CommandCheck -Port $port -Command 'set loadcell.source hx711' -ReadMs 1500 -ExpectedPatterns @(
+        '^cmd: set key=LOADCELL.SOURCE value=HX711 ok=1 reboot=1$'
+    )
+    $setLoadCellDataPinLines = Invoke-CommandCheck -Port $port -Command 'set pin.loadcell_data pc2' -ReadMs 1500 -ExpectedPatterns @(
+        '^cmd: set key=PIN.LOADCELL_DATA value=PC2 ok=1 reboot=1$'
+    )
+    $setLoadCellClockPinLines = Invoke-CommandCheck -Port $port -Command 'set pin.loadcell_clock pa0' -ReadMs 1500 -ExpectedPatterns @(
+        '^cmd: set key=PIN.LOADCELL_CLOCK value=PA0 ok=1 reboot=1$'
+    )
+    $configLoadCellCustomLines = Invoke-CommandCheck -Port $port -Command 'config' -ReadMs 1500 -ExpectedPatterns @(
+        '^cmd: config$',
+        '^config loadcell\.source=hx711 loadcell\.connector=custom loadcell\.threshold=1000 pin\.loadcell_data=PC2 pin\.loadcell_clock=PA0$'
+    )
+    Assert-LoadCellConfig -Lines $configLoadCellCustomLines -ExpectedSource 'hx711' -ExpectedConnector 'custom' -ExpectedDataPin 'PC2' -ExpectedClockPin 'PA0' -ExpectedThreshold 1000
+
     $simThreshLines = Invoke-CommandCheck -Port $port -Command 'simthresh 1000' -ReadMs 1500 -ExpectedPatterns @(
         'cmd: simthresh thresh=1000',
         '^sim raw=\d+ thresh=1000 load=\d+ mech=\d+ stall=\d+$'
@@ -417,6 +488,14 @@ try {
     $null = $enableLines
     $null = $enableAliasLines
     $null = $setThresholdLines
+    $null = $setLoadCellDetLines
+    $null = $configLoadCellDetLines
+    $null = $setLoadCellTh1Lines
+    $null = $configLoadCellTh1Lines
+    $null = $setLoadCellSourceLines
+    $null = $setLoadCellDataPinLines
+    $null = $setLoadCellClockPinLines
+    $null = $configLoadCellCustomLines
     $null = $simThreshLines
     $null = $simLoadLines
     $null = $simSafetyLines
