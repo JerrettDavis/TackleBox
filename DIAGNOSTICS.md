@@ -111,6 +111,8 @@ Time ~5s:    Continuous slow blink at 1 Hz (main loop heartbeat)
 - `driver verify=0 ifcnt_valid=0 ifcnt=0`
 - verified registers remain `0x00000000`
 - `HOME`, `ENABLE`, and motion commands are blocked with `reason=tmc_unverified` until the override is enabled
+- a separate working Klipper config for this SKR2 bench also uses `x_uart_pin=PE0`, `x_endstop_pin=PC1`, and no explicit TMC UART address override, which corroborates the default address `0` assumption used here
+- matching Klipper's `0xF5` request framing, tightening read turnaround, probing `TMC.UART_BIT_US` around `25us`, and switching TX to open-drain all still produced the same all-zero reply signature on this bench
 **Check**:
 - Confirm the X slot actually has a UART-capable TMC2209 module installed.
 - Confirm the SKR2 X-slot UART jumper configuration is set for UART mode rather than standalone mode.
@@ -118,7 +120,7 @@ Time ~5s:    Continuous slow blink at 1 Hz (main loop heartbeat)
 - Confirm the PDN/UART path from the X driver to `PE0` is actually populated and not isolated by jumper placement.
 - Re-run `DRIVER` after each physical change; do not continue to the load-cell phase until `verify=1` and `ifcnt_valid=1`.
 - Use `test\run_bench_readiness.ps1` after each physical change to capture the current `DRIVER` state and, if desired, rerun the calibrated motion check with the same host-side procedure each time.
-- If the driver address is unknown, use `SET CHANNEL.ADDRESS <0..3>` followed by `DRIVER` to probe the address live before changing firmware again.
+- If the driver address is unknown, use `SET CHANNEL.ADDRESS <0..3>` followed by `DRIVER` to probe the address live before changing firmware again. A full `0..3` sweep on this bench produced the same all-zero reply signature for every address.
 
 ### Scenario 5: Heartbeat visible, stepper moving, endstop not responding
 **Diagnosis**: Endstop wiring or initialization issue

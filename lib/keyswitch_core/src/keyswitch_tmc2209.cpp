@@ -4,7 +4,8 @@ namespace keyswitch {
 
 namespace {
 
-constexpr uint8_t kTmc2209SyncByte = 0x05U;
+constexpr uint8_t kTmc2209RequestSyncByte = 0xF5U;
+constexpr uint8_t kTmc2209ReplySyncByte = 0x05U;
 
 }
 
@@ -81,7 +82,7 @@ uint32_t encodeTmc2209ReadFrame(uint8_t slaveAddress, Tmc2209Register reg, uint8
         return 0U;
     }
 
-    out[0] = kTmc2209SyncByte;
+    out[0] = kTmc2209RequestSyncByte;
     out[1] = slaveAddress;
     out[2] = (uint8_t)reg & 0x7FU;
     out[3] = tmc2209Crc8(out, 3U);
@@ -95,7 +96,7 @@ uint32_t encodeTmc2209WriteFrame(uint8_t slaveAddress, Tmc2209Register reg, uint
         return 0U;
     }
 
-    out[0] = kTmc2209SyncByte;
+    out[0] = kTmc2209RequestSyncByte;
     out[1] = slaveAddress;
     out[2] = (uint8_t)reg | 0x80U;
     out[3] = (uint8_t)((value >> 24) & 0xFFU);
@@ -113,7 +114,7 @@ uint8_t decodeTmc2209ReadReply(Tmc2209Register reg, const uint8_t *frame, uint32
         return 0U;
     }
 
-    if ((frame[0] != kTmc2209SyncByte) || (frame[1] != 0xFFU) || (frame[2] != ((uint8_t)reg & 0x7FU)))
+    if ((frame[0] != kTmc2209ReplySyncByte) || (frame[1] != 0xFFU) || (frame[2] != ((uint8_t)reg & 0x7FU)))
     {
         return 0U;
     }

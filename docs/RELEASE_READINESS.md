@@ -75,7 +75,7 @@ Supporting release docs:
 - `lib/keyswitch_core` is still branded around the current bring-up domain instead of the final `Boatswain` package name
 - multi-board support is still architectural intent rather than a demonstrated second-board implementation
 - release packaging exists for the SKR 2 reference product, but GitHub release automation is not yet defined
-- TMC UART verification on the current reference bench still reports `verify=0` / `ifcnt_valid=0` after the firmware-side sync-byte path was corrected and re-tested live, so the remaining blocker should be treated as board-side wiring, jumper, address, or module-state investigation rather than as a resolved motion subsystem
+- TMC UART verification on the current reference bench still reports `verify=0` / `ifcnt_valid=0` after aligning request/reply framing with Klipper, tightening read turnaround, testing Klipper-like bit timing, and switching TX to open-drain; a separate working Klipper configuration also corroborates `PE0` and default address `0`, so the remaining blocker should be treated as board-side wiring, jumper, or module-state investigation rather than as a pin-map mismatch
 
 ## Release Decision Rule
 

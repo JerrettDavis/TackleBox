@@ -27,7 +27,7 @@ static void test_tmc2209_frame_encoding()
     const uint32_t length = keyswitch::encodeTmc2209WriteFrame(0U, keyswitch::Tmc2209Register::IholdIrun, 0x00081206UL, frame, sizeof(frame));
 
     require_true(length == 8U, "TMC2209 write frame should be 8 bytes");
-    require_true(frame[0] == 0x05U, "frame should start with sync byte");
+    require_true(frame[0] == 0xF5U, "frame should start with request sync byte");
     require_true(frame[1] == 0x00U, "frame should target slave address 0");
     require_true(frame[2] == 0x90U, "frame should set write bit on the IHOLD_IRUN register");
     require_true(frame[3] == 0x00U && frame[4] == 0x08U && frame[5] == 0x12U && frame[6] == 0x06U, "frame payload should be big-endian register data");
@@ -39,7 +39,7 @@ static void test_tmc2209_read_frame_and_reply_decoding()
     uint8_t request[4] = {0};
     const uint32_t requestLength = keyswitch::encodeTmc2209ReadFrame(0U, keyswitch::Tmc2209Register::Ifcnt, request, sizeof(request));
     require_true(requestLength == 4U, "TMC2209 read frame should be 4 bytes");
-    require_true(request[0] == 0x05U, "read frame should start with sync byte");
+    require_true(request[0] == 0xF5U, "read frame should start with request sync byte");
     require_true(request[1] == 0x00U, "read frame should target slave address 0");
     require_true(request[2] == 0x02U, "read frame should target the IFCNT register");
     require_true(request[3] == keyswitch::tmc2209Crc8(request, 3U), "read frame crc should match helper calculation");

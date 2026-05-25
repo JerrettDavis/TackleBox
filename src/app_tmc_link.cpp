@@ -41,7 +41,7 @@ void x_tmc_uart_idle(const PersistedFirmwareConfig &config)
 
 void x_tmc_uart_set_output_mode(const PersistedFirmwareConfig &config)
 {
-    pin_set_output(active_motion_channel(config).pins.uart);
+    pin_set_output_open_drain(active_motion_channel(config).pins.uart);
     x_tmc_uart_idle(config);
 }
 
