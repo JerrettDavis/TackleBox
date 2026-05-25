@@ -632,7 +632,7 @@ Keyswitch tester targets:
 
 The firmware shell now has explicit placeholders for the next two hardware integrations:
 
-1. `read_load_cell_triggered()` / `read_load_cell_raw()` in `src/main.cpp` for HX711 or ADC-based force acquisition.
+1. `src/load_cell.cpp` and the `read_load_cell_triggered()` / `read_load_cell_raw()` seam in `src/main.cpp` for HX711 or ADC-based force acquisition.
 2. `read_stallguard_triggered()` in `src/main.cpp` for TMC2209 DIAG or UART-driven stall reporting.
 3. `read_mechanical_fallback_triggered()` in `src/main.cpp` for combining the configured `x_stop` signal with simulated or future alternate fallback sources.
 

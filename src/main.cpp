@@ -6,6 +6,7 @@
 #include "keyswitch_domain.h"
 #include "keyswitch_protocol.h"
 #include "keyswitch_tmc2209.h"
+#include "load_cell.h"
 #include "usb_cdc_bridge.h"
 #include "usbd_cdc_if.h"
 #include "stm32f4xx_hal.h"
@@ -465,13 +466,6 @@ static void usb_write_str(const char *s)
     usb_cdc_bridge_write(s, len);
 }
 
-struct SimulationState {
-    uint32_t loadCellRaw;
-    uint32_t loadCellThreshold;
-    uint8_t mechanicalFallbackOverride;
-    uint8_t stallOverride;
-};
-
 struct StepScheduler {
     uint32_t pulseStartedCycle;
     uint32_t lastStepCycle;
@@ -481,12 +475,7 @@ struct StepScheduler {
     uint8_t issuedLatch;
 };
 
-static SimulationState g_simulation = {
-    0U,
-    1000U,
-    0U,
-    0U,
-};
+static LoadCellRuntime g_load_cell = load_cell_make_default(1000U);
 
 static StepScheduler g_step_scheduler = {
     0U,
@@ -1047,7 +1036,7 @@ static ApplyConfigResult apply_config_key_value(
         result.accepted = 1U;
         if (apply_live != 0U)
         {
-            g_simulation.loadCellThreshold = parsed_u32;
+            load_cell_set_threshold(&g_load_cell, parsed_u32);
         }
     }
     else if (same_text_case_sensitive(key, "TMC.UART_BIT_US") && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 > 0U))
@@ -1243,11 +1232,11 @@ static void emit_simulation_line(uint8_t load_triggered)
         line,
         sizeof(line),
         "sim raw=%lu thresh=%lu load=%lu mech=%lu stall=%lu\r\n",
-        (unsigned long)g_simulation.loadCellRaw,
-        (unsigned long)g_simulation.loadCellThreshold,
+        (unsigned long)g_load_cell.raw,
+        (unsigned long)g_load_cell.threshold,
         (unsigned long)load_triggered,
-        (unsigned long)g_simulation.mechanicalFallbackOverride,
-        (unsigned long)g_simulation.stallOverride);
+        (unsigned long)g_load_cell.mechanicalFallbackOverride,
+        (unsigned long)g_load_cell.stallOverride);
     if (len > 0)
     {
         usb_cdc_bridge_write(line, (uint16_t)len);
@@ -1256,22 +1245,22 @@ static void emit_simulation_line(uint8_t load_triggered)
 
 static uint8_t read_load_cell_triggered(void)
 {
-    return (g_simulation.loadCellRaw >= g_simulation.loadCellThreshold) ? 1U : 0U;
+    return load_cell_triggered(g_load_cell);
 }
 
 static uint32_t read_load_cell_raw(void)
 {
-    return g_simulation.loadCellRaw;
+    return load_cell_raw(g_load_cell);
 }
 
 static uint8_t read_stallguard_triggered(void)
 {
-    return g_simulation.stallOverride;
+    return g_load_cell.stallOverride;
 }
 
 static uint8_t read_mechanical_fallback_triggered(uint8_t raw_x_stop)
 {
-    return (g_simulation.mechanicalFallbackOverride != 0U) ? 1U : (uint8_t)x_stop_pressed_from_raw(raw_x_stop);
+    return (g_load_cell.mechanicalFallbackOverride != 0U) ? 1U : (uint8_t)x_stop_pressed_from_raw(raw_x_stop);
 }
 
 static ApplyConfigResult apply_boot_config_key_value(PersistedFirmwareConfig *config, const char *key, const char *value)
@@ -1301,7 +1290,7 @@ int main()
 
     g_config_state = select_boot_config(&g_persisted_config, apply_boot_config_key_value);
 
-    g_simulation.loadCellThreshold = g_persisted_config.simLoadThreshold;
+    load_cell_set_threshold(&g_load_cell, g_persisted_config.simLoadThreshold);
     tmc_driver_runtime().tmc2209 = current_motion_channel_const().tmc2209;
 
     enable_gpio_clocks_for_config(g_persisted_config);
@@ -1710,8 +1699,8 @@ int main()
             else if (command.type == keyswitch::CommandType::SimLoad)
             {
                 char line[64];
-                g_simulation.loadCellRaw = (uint32_t)command.value;
-                int len = snprintf(line, sizeof(line), "cmd: simload raw=%lu\r\n", (unsigned long)g_simulation.loadCellRaw);
+                load_cell_set_raw(&g_load_cell, (uint32_t)command.value);
+                int len = snprintf(line, sizeof(line), "cmd: simload raw=%lu\r\n", (unsigned long)g_load_cell.raw);
                 if (len > 0)
                 {
                     usb_cdc_bridge_write(line, (uint16_t)len);
@@ -1721,10 +1710,10 @@ int main()
             else if (command.type == keyswitch::CommandType::SimThreshold)
             {
                 char line[72];
-                g_simulation.loadCellThreshold = (uint32_t)command.value;
-                g_persisted_config.simLoadThreshold = g_simulation.loadCellThreshold;
+                load_cell_set_threshold(&g_load_cell, (uint32_t)command.value);
+                g_persisted_config.simLoadThreshold = g_load_cell.threshold;
                 g_config_state.dirty = 1U;
-                int len = snprintf(line, sizeof(line), "cmd: simthresh thresh=%lu\r\n", (unsigned long)g_simulation.loadCellThreshold);
+                int len = snprintf(line, sizeof(line), "cmd: simthresh thresh=%lu\r\n", (unsigned long)g_load_cell.threshold);
                 if (len > 0)
                 {
                     usb_cdc_bridge_write(line, (uint16_t)len);
@@ -1734,8 +1723,8 @@ int main()
             else if (command.type == keyswitch::CommandType::SimMechanical)
             {
                 char line[64];
-                g_simulation.mechanicalFallbackOverride = (uint8_t)(command.value != 0U ? 1U : 0U);
-                int len = snprintf(line, sizeof(line), "cmd: simmech value=%lu\r\n", (unsigned long)g_simulation.mechanicalFallbackOverride);
+                load_cell_set_mechanical_fallback(&g_load_cell, (uint8_t)(command.value != 0U ? 1U : 0U));
+                int len = snprintf(line, sizeof(line), "cmd: simmech value=%lu\r\n", (unsigned long)g_load_cell.mechanicalFallbackOverride);
                 if (len > 0)
                 {
                     usb_cdc_bridge_write(line, (uint16_t)len);
@@ -1745,8 +1734,8 @@ int main()
             else if (command.type == keyswitch::CommandType::SimStall)
             {
                 char line[64];
-                g_simulation.stallOverride = (uint8_t)(command.value != 0U ? 1U : 0U);
-                int len = snprintf(line, sizeof(line), "cmd: simstall value=%lu\r\n", (unsigned long)g_simulation.stallOverride);
+                load_cell_set_stall_override(&g_load_cell, (uint8_t)(command.value != 0U ? 1U : 0U));
+                int len = snprintf(line, sizeof(line), "cmd: simstall value=%lu\r\n", (unsigned long)g_load_cell.stallOverride);
                 if (len > 0)
                 {
                     usb_cdc_bridge_write(line, (uint16_t)len);
@@ -1755,9 +1744,7 @@ int main()
             }
             else if (command.type == keyswitch::CommandType::SimClear)
             {
-                g_simulation.loadCellRaw = 0U;
-                g_simulation.mechanicalFallbackOverride = 0U;
-                g_simulation.stallOverride = 0U;
+                load_cell_clear(&g_load_cell);
                 usb_write_str("cmd: simclear\r\n");
                 emit_simulation_line(read_load_cell_triggered());
             }

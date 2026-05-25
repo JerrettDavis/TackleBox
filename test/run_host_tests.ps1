@@ -60,6 +60,13 @@ $tests = @(
         );
     },
     @{
+        Name = 'test_load_cell';
+        Sources = @(
+            (Join-Path $root 'src\load_cell.cpp'),
+            (Join-Path $PSScriptRoot 'test_load_cell\test_main.cpp')
+        );
+    },
+    @{
         Name = 'test_domain';
         Sources = $domainSources + @(Join-Path $PSScriptRoot 'test_domain\test_main.cpp');
     },
