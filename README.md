@@ -653,6 +653,7 @@ Current bench notes:
 - The current nicest motion tradeoff on this reference bench was `MOTION.HOME_FEEDRATE_MM_PER_MIN=600` and `MOTION.MOVE_FEEDRATE_MM_PER_MIN=1500`; the axis remained smooth, stable, and nearly silent there.
 - `MOTION.MOVE_FEEDRATE_MM_PER_MIN=2400` completed repeated away-and-back passes without fault, but it was noticeably noisier and more vibration-prone, so treat that range as exploratory until the TMC chopping and quiet-step behavior are tuned properly.
 - The current runtime now uses timer-driven step emission, incremental display flushing, and deferred runtime TMC sync; use the heartbeat `loop_*`, `steps_*`, and `tmc_sync` fields to watch whether later changes reintroduce loop starvation or queued driver work.
+- HX711 sampling now uses a falling-edge ready interrupt on the data pin to gate the blocking 24-bit read path, which keeps the main loop from continuously polling the load-cell ready line between samples.
 - Do not treat the load-cell phase as ready until the TMC UART path verifies cleanly without the unverified-motion override.
 
 ## Design Direction

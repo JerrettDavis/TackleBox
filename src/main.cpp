@@ -21,6 +21,9 @@ static PersistedFirmwareConfig g_persisted_config = {};
 static ConfigRuntimeState g_config_state = {};
 static const Mini12864PanelPins g_panel_pins = mini12864_panel_pins();
 static Mini12864PanelInputs g_panel_inputs = {};
+static volatile uint8_t g_load_cell_hx711_ready = 0U;
+static PinAssignment g_load_cell_hx711_irq_pin = {};
+static uint8_t g_load_cell_hx711_irq_configured = 0U;
 static void configure_load_cell_io(const LoadCellConfig &config);
 
 static void emit_panel_pins_line(void)
@@ -76,6 +79,114 @@ static void emit_panel_pins_line(void)
 static uint8_t same_text_case_sensitive(const char *lhs, const char *rhs)
 {
     return strcmp(lhs, rhs) == 0 ? 1U : 0U;
+}
+
+static uint32_t exti_line_mask(uint8_t pin)
+{
+    return 1UL << pin;
+}
+
+static uint32_t gpio_port_exti_code(uint8_t port_id)
+{
+    switch ((GpioPortId)port_id)
+    {
+    case GpioPortId::A: return 0U;
+    case GpioPortId::B: return 1U;
+    case GpioPortId::C: return 2U;
+    case GpioPortId::D: return 3U;
+    case GpioPortId::E: return 4U;
+    case GpioPortId::F: return 5U;
+    case GpioPortId::G: return 6U;
+    case GpioPortId::H: return 7U;
+    default: return 0U;
+    }
+}
+
+static IRQn_Type exti_irqn_from_pin(uint8_t pin)
+{
+    if (pin <= 4U) return (IRQn_Type)((int32_t)EXTI0_IRQn + (int32_t)pin);
+    if (pin <= 9U) return EXTI9_5_IRQn;
+    return EXTI15_10_IRQn;
+}
+
+static void load_cell_hx711_ready_interrupt_disable(void)
+{
+    if (g_load_cell_hx711_irq_configured == 0U)
+    {
+        g_load_cell_hx711_ready = 0U;
+        return;
+    }
+
+    const uint32_t mask = exti_line_mask(g_load_cell_hx711_irq_pin.pin);
+    EXTI->IMR &= ~mask;
+    EXTI->FTSR &= ~mask;
+    EXTI->RTSR &= ~mask;
+    EXTI->PR = mask;
+    g_load_cell_hx711_irq_configured = 0U;
+    g_load_cell_hx711_ready = 0U;
+}
+
+static void load_cell_hx711_ready_interrupt_configure(PinAssignment pin)
+{
+    RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
+    __DSB();
+
+    const uint32_t exti_index = pin.pin / 4U;
+    const uint32_t exti_shift = (pin.pin & 0x3U) * 4U;
+    const uint32_t exti_mask = 0xFUL << exti_shift;
+    const uint32_t line_mask = exti_line_mask(pin.pin);
+
+    SYSCFG->EXTICR[exti_index] = (SYSCFG->EXTICR[exti_index] & ~exti_mask) | (gpio_port_exti_code(pin.portId) << exti_shift);
+    EXTI->IMR &= ~line_mask;
+    EXTI->RTSR &= ~line_mask;
+    EXTI->FTSR |= line_mask;
+    EXTI->PR = line_mask;
+    EXTI->IMR |= line_mask;
+
+    const IRQn_Type irq = exti_irqn_from_pin(pin.pin);
+    HAL_NVIC_SetPriority(irq, 4U, 0U);
+    HAL_NVIC_EnableIRQ(irq);
+
+    g_load_cell_hx711_irq_pin = pin;
+    g_load_cell_hx711_irq_configured = 1U;
+    g_load_cell_hx711_ready = (pin_read(pin) == 0U) ? 1U : 0U;
+}
+
+static void handle_load_cell_hx711_exti(uint8_t pin)
+{
+    if ((g_load_cell_hx711_irq_configured == 0U) || (pin != g_load_cell_hx711_irq_pin.pin))
+    {
+        return;
+    }
+
+    const uint32_t mask = exti_line_mask(pin);
+    if ((EXTI->PR & mask) == 0U)
+    {
+        return;
+    }
+
+    EXTI->PR = mask;
+    g_load_cell_hx711_ready = 1U;
+}
+
+extern "C" void EXTI0_IRQHandler(void) { handle_load_cell_hx711_exti(0U); }
+extern "C" void EXTI1_IRQHandler(void) { handle_load_cell_hx711_exti(1U); }
+extern "C" void EXTI2_IRQHandler(void) { handle_load_cell_hx711_exti(2U); }
+extern "C" void EXTI3_IRQHandler(void) { handle_load_cell_hx711_exti(3U); }
+extern "C" void EXTI4_IRQHandler(void) { handle_load_cell_hx711_exti(4U); }
+extern "C" void EXTI9_5_IRQHandler(void)
+{
+    for (uint8_t pin = 5U; pin <= 9U; ++pin)
+    {
+        handle_load_cell_hx711_exti(pin);
+    }
+}
+extern "C" void EXTI15_10_IRQHandler(void)
+{
+    for (uint8_t pin = 10U; pin <= 15U; ++pin)
+    {
+        handle_load_cell_hx711_exti(pin);
+    }
 }
 
 enum TmcSyncRequestFlags : uint8_t {
@@ -1842,6 +1953,8 @@ static uint8_t load_cell_hx711_pins_valid(const LoadCellConfig &config)
 
 static void configure_load_cell_io(const LoadCellConfig &config)
 {
+    load_cell_hx711_ready_interrupt_disable();
+
     if ((uint8_t)config.source != (uint8_t)LoadCellSourceKind::Hx711)
     {
         return;
@@ -1859,6 +1972,7 @@ static void configure_load_cell_io(const LoadCellConfig &config)
     pin_set_input_pull(config.pins.data, 1U);
     pin_set_output(config.pins.clock);
     pin_write_low(config.pins.clock);
+    load_cell_hx711_ready_interrupt_configure(config.pins.data);
 }
 
 static void refresh_load_cell_input(void)
@@ -1874,10 +1988,12 @@ static void refresh_load_cell_input(void)
         return;
     }
 
-    if (pin_read(config.pins.data) != 0U)
+    if (g_load_cell_hx711_ready == 0U)
     {
         return;
     }
+
+    g_load_cell_hx711_ready = 0U;
 
     uint32_t sample = 0U;
     const uint32_t pulse_cycles = cycles_from_us(1U);
@@ -1894,6 +2010,11 @@ static void refresh_load_cell_input(void)
     delay_cycles(pulse_cycles);
     pin_write_low(config.pins.clock);
     delay_cycles(pulse_cycles);
+
+    if (pin_read(config.pins.data) == 0U)
+    {
+        g_load_cell_hx711_ready = 1U;
+    }
 
     load_cell_set_hx711_sample(&g_load_cell, load_cell_hx711_decode_u24(sample));
 }
