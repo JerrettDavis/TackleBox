@@ -185,6 +185,31 @@ void test_integration_cycle_command_completes_press_and_return_home(void)
     require_true(state.currentPosition == 0, "cycle routine should return to home position");
 }
 
+void test_integration_cycle_command_returns_home_after_load_cell_trip(void)
+{
+    keyswitch::MotionConfig config = make_config();
+    keyswitch::RuntimeConfig runtime = make_runtime();
+    keyswitch::MotionState state = keyswitch::makeInitialState(0U);
+
+    apply_command_to_domain(keyswitch::parseCommand("SETPOS 0"), &state, config, 1U);
+    apply_command_to_domain(keyswitch::parseCommand("PRESSPOS 4"), &state, config, 2U);
+    apply_command_to_domain(keyswitch::parseCommand("CYCLE 1"), &state, config, 3U);
+
+    keyswitch::MotionInputs inputs = make_inputs(10U, 1U);
+    inputs.loadCellTriggered = 1U;
+    keyswitch::MotionOutputs outputs = keyswitch::tickMotion(&state, inputs, config, runtime);
+
+    require_true(state.homingState == keyswitch::HomingState::CycleToHome, "load-cell trip during cycle press should reverse back toward home");
+    require_true(state.lastStopSource == keyswitch::StopSource::LoadCell, "cycle stop source should record the load cell");
+    require_true(outputs.stopSource == keyswitch::StopSource::LoadCell, "cycle outputs should report the load-cell stop source");
+
+    tick_until_done(&state, config, runtime, 20U, 16U);
+
+    require_true(state.completedCycles == 1U, "interrupted cycle should still count as a completed probe cycle");
+    require_true(state.currentPosition == 0, "interrupted cycle should settle back at home");
+    require_true(state.homingState == keyswitch::HomingState::Done, "interrupted cycle should settle back into Done state");
+}
+
 void test_integration_stop_command_cancels_active_motion(void)
 {
     keyswitch::MotionConfig config = make_config();
@@ -271,6 +296,7 @@ int main()
         test_integration_absolute_move_command_reaches_target();
         test_integration_relative_move_alias_reaches_target();
         test_integration_cycle_command_completes_press_and_return_home();
+        test_integration_cycle_command_returns_home_after_load_cell_trip();
         test_integration_stop_command_cancels_active_motion();
         test_integration_motion_faults_when_load_cell_triggers_mid_move();
         test_integration_homed_idle_state_stays_disabled_until_explicit_hold_enable();

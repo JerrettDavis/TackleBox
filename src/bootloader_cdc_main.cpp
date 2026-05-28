@@ -1,5 +1,6 @@
 #include "usb_cdc_bridge.h"
 #include "boot_mode.h"
+#include "boot_panel_splash.h"
 #include "bootloader_flash.h"
 #include "bootloader_protocol.h"
 #include "usbd_cdc_if.h"
@@ -13,6 +14,8 @@
 
 static constexpr uint32_t kCommandBufferSize = 320U;
 static constexpr uint32_t kMaxReadBytes = 32U;
+static constexpr uint32_t kAutoBootDelayMs = 1500U;
+static constexpr uint32_t kHeldBootloaderIdleBootDelayMs = 15000U;
 
 extern "C" void SysTick_Handler(void)
 {
@@ -321,6 +324,7 @@ static void service_command(const char *command)
 int main(void)
 {
     SCB->VTOR = FLASH_BASE | VECT_TAB_OFFSET;
+    const uint8_t stay_in_bootloader = bootloader_consume_stay_in_bootloader_request();
 
     if ((bootloader_consume_application_boot_request() != 0U) &&
         (bootloader_application_present() != 0U))
@@ -334,21 +338,45 @@ int main(void)
         system_clock_config_hsi_safe();
     }
 
+    boot_panel_splash_init();
+    if (stay_in_bootloader != 0U)
+    {
+        boot_panel_splash_show("KEYSWITCH BOOT", "HOLDING FOR USB");
+    }
+    else
+    {
+        boot_panel_splash_show("KEYSWITCH BOOT", "AUTO START APP");
+    }
+
     usb_cdc_bridge_init();
 
     uint8_t announced_ready = 0U;
+    uint8_t auto_boot_armed = 1U;
+    uint32_t auto_boot_deadline_ms = HAL_GetTick() + ((stay_in_bootloader != 0U) ? kHeldBootloaderIdleBootDelayMs : kAutoBootDelayMs);
     char command[kCommandBufferSize] = {};
 
     while (1)
     {
+        if ((auto_boot_armed != 0U) &&
+            ((int32_t)(HAL_GetTick() - auto_boot_deadline_ms) >= 0) &&
+            (bootloader_application_present() != 0U))
+        {
+            boot_panel_splash_show("KEYSWITCH BOOT", "STARTING APP");
+            bootloader_request_application_boot();
+            HAL_Delay(20U);
+            NVIC_SystemReset();
+        }
+
         if ((announced_ready == 0U) && (usb_cdc_bridge_wait_until_ready(5U) != 0))
         {
             write_line("SKR2 CDC bootloader ready\r\n");
+            boot_panel_splash_show("KEYSWITCH BOOT", "CDC READY");
             announced_ready = 1U;
         }
 
         if (CDC_ReadCommand_FS(command, sizeof(command)) != 0U)
         {
+            auto_boot_deadline_ms = HAL_GetTick() + kHeldBootloaderIdleBootDelayMs;
             service_command(command);
         }
 

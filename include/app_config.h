@@ -113,6 +113,10 @@ struct PersistedFirmwareConfig {
     uint32_t statusIntervalMs;
     uint32_t heartbeatIntervalMs;
     uint32_t bootHostWaitMs;
+    uint8_t panelColorRed;
+    uint8_t panelColorGreen;
+    uint8_t panelColorBlue;
+    uint8_t reserved1;
 };
 
 inline uint8_t motion_channel_index_valid(uint8_t index)

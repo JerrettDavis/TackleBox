@@ -1,12 +1,77 @@
 #include "load_cell.h"
 
+#include <limits.h>
 #include <string.h>
+
+static const uint8_t kHx711TriggerDebounceCount = 3U;
+static const uint8_t kHx711AutoTareSampleCount = 16U;
+
+static void load_cell_update_hx711_trigger_state(LoadCellRuntime *runtime)
+{
+    if (runtime == 0)
+    {
+        return;
+    }
+
+    if (runtime->raw >= runtime->threshold)
+    {
+        if (runtime->overThresholdCount < 255U)
+        {
+            ++runtime->overThresholdCount;
+        }
+        runtime->underThresholdCount = 0U;
+        if (runtime->overThresholdCount >= kHx711TriggerDebounceCount)
+        {
+            runtime->triggerState = 1U;
+        }
+        return;
+    }
+
+    if (runtime->underThresholdCount < 255U)
+    {
+        ++runtime->underThresholdCount;
+    }
+    runtime->overThresholdCount = 0U;
+    if (runtime->underThresholdCount >= kHx711TriggerDebounceCount)
+    {
+        runtime->triggerState = 0U;
+    }
+}
+
+static uint32_t blend_u32(uint32_t current, uint32_t next)
+{
+    return (current == 0U) ? next : (((current * 3U) + next) / 4U);
+}
 
 LoadCellRuntime load_cell_make_default(uint32_t threshold)
 {
     LoadCellRuntime runtime = {};
+    runtime.source = (uint8_t)LoadCellSourceKind::Simulation;
     runtime.threshold = threshold;
     return runtime;
+}
+
+void load_cell_apply_config(LoadCellRuntime *runtime, const LoadCellConfig &config)
+{
+    if (runtime == 0)
+    {
+        return;
+    }
+
+    if (runtime->source != config.source)
+    {
+        runtime->raw = 0U;
+        runtime->triggerState = 0U;
+        runtime->overThresholdCount = 0U;
+        runtime->underThresholdCount = 0U;
+        runtime->hx711TareSamples = 0U;
+        runtime->hx711TareReady = 0U;
+        runtime->hx711Baseline = 0;
+        runtime->hx711Accumulator = 0;
+    }
+
+    runtime->source = config.source;
+    runtime->threshold = config.threshold;
 }
 
 void load_cell_set_raw(LoadCellRuntime *runtime, uint32_t raw)
@@ -17,6 +82,56 @@ void load_cell_set_raw(LoadCellRuntime *runtime, uint32_t raw)
     }
 
     runtime->raw = raw;
+    if (runtime->source == (uint8_t)LoadCellSourceKind::Hx711)
+    {
+        load_cell_update_hx711_trigger_state(runtime);
+    }
+    else
+    {
+        runtime->triggerState = (runtime->raw >= runtime->threshold) ? 1U : 0U;
+    }
+}
+
+void load_cell_set_hx711_sample(LoadCellRuntime *runtime, int32_t sample)
+{
+    if (runtime == 0)
+    {
+        return;
+    }
+
+    if (runtime->source != (uint8_t)LoadCellSourceKind::Hx711)
+    {
+        load_cell_set_raw(runtime, load_cell_force_from_signed(sample));
+        return;
+    }
+
+    if (runtime->hx711TareReady == 0U)
+    {
+        runtime->hx711Accumulator += sample;
+        ++runtime->hx711TareSamples;
+        runtime->raw = 0U;
+        runtime->triggerState = 0U;
+        runtime->overThresholdCount = 0U;
+        runtime->underThresholdCount = 0U;
+        if (runtime->hx711TareSamples >= kHx711AutoTareSampleCount)
+        {
+            runtime->hx711Baseline = runtime->hx711Accumulator / (int32_t)runtime->hx711TareSamples;
+            runtime->hx711Accumulator = 0;
+            runtime->hx711TareReady = 1U;
+        }
+        return;
+    }
+
+    const int32_t relative_sample = sample - runtime->hx711Baseline;
+    const uint32_t relative_force = load_cell_force_from_signed(relative_sample);
+    runtime->raw = blend_u32(runtime->raw, relative_force);
+
+    if (relative_force < ((runtime->threshold > 0U) ? ((runtime->threshold / 8U) + 1U) : 32U))
+    {
+        runtime->hx711Baseline = runtime->hx711Baseline + (relative_sample / 8);
+    }
+
+    load_cell_update_hx711_trigger_state(runtime);
 }
 
 void load_cell_set_threshold(LoadCellRuntime *runtime, uint32_t threshold)
@@ -27,6 +142,30 @@ void load_cell_set_threshold(LoadCellRuntime *runtime, uint32_t threshold)
     }
 
     runtime->threshold = threshold;
+    runtime->triggerState = 0U;
+    runtime->overThresholdCount = 0U;
+    runtime->underThresholdCount = 0U;
+}
+
+void load_cell_tare(LoadCellRuntime *runtime)
+{
+    if (runtime == 0)
+    {
+        return;
+    }
+
+    runtime->raw = 0U;
+    runtime->triggerState = 0U;
+    runtime->overThresholdCount = 0U;
+    runtime->underThresholdCount = 0U;
+
+    if (runtime->source == (uint8_t)LoadCellSourceKind::Hx711)
+    {
+        runtime->hx711TareSamples = 0U;
+        runtime->hx711TareReady = 0U;
+        runtime->hx711Baseline = 0;
+        runtime->hx711Accumulator = 0;
+    }
 }
 
 void load_cell_set_mechanical_fallback(LoadCellRuntime *runtime, uint8_t enabled)
@@ -57,18 +196,67 @@ void load_cell_clear(LoadCellRuntime *runtime)
     }
 
     runtime->raw = 0U;
+    runtime->triggerState = 0U;
+    runtime->overThresholdCount = 0U;
+    runtime->underThresholdCount = 0U;
+    runtime->hx711TareSamples = 0U;
+    runtime->hx711TareReady = 0U;
+    runtime->hx711Baseline = 0;
+    runtime->hx711Accumulator = 0;
     runtime->mechanicalFallbackOverride = 0U;
     runtime->stallOverride = 0U;
 }
 
 uint8_t load_cell_triggered(const LoadCellRuntime &runtime)
 {
-    return runtime.raw >= runtime.threshold ? 1U : 0U;
+    if ((runtime.source != (uint8_t)LoadCellSourceKind::Simulation) &&
+        (runtime.source != (uint8_t)LoadCellSourceKind::Hx711))
+    {
+        return 0U;
+    }
+
+    return runtime.triggerState;
 }
 
 uint32_t load_cell_raw(const LoadCellRuntime &runtime)
 {
+    if ((runtime.source != (uint8_t)LoadCellSourceKind::Simulation) &&
+        (runtime.source != (uint8_t)LoadCellSourceKind::Hx711))
+    {
+        return 0U;
+    }
+
     return runtime.raw;
+}
+
+uint8_t load_cell_source(const LoadCellRuntime &runtime)
+{
+    return runtime.source;
+}
+
+int32_t load_cell_hx711_decode_u24(uint32_t sample)
+{
+    sample &= 0x00FFFFFFUL;
+    if ((sample & 0x00800000UL) != 0U)
+    {
+        sample |= 0xFF000000UL;
+    }
+    return (int32_t)sample;
+}
+
+uint32_t load_cell_force_from_signed(int32_t sample)
+{
+    if (sample >= 0)
+    {
+        return (uint32_t)sample;
+    }
+
+    if (sample == INT32_MIN)
+    {
+        return 2147483648UL;
+    }
+
+    return (uint32_t)(-sample);
 }
 
 const char *load_cell_source_name(uint8_t source)

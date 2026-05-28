@@ -15,6 +15,15 @@ Set-Location "c:\git\BTT SKR2 Testing"
 & ".\test\run_host_tests.ps1"
 ```
 
+Export a local simulated probe-workflow curve with:
+
+```powershell
+Set-Location "c:\git\BTT SKR2 Testing"
+& ".\test\run_simulated_probe_workflow.ps1"
+```
+
+That reruns the host suite, then writes `tools\arm-dashboard\simulated-probe-curve.json` from the host-side probe workflow simulator so the dashboard can visualize the response curve without board hardware.
+
 These tests intentionally target the extracted `lib/keyswitch_core/` layer so
 the critical behavior can be validated without requiring the SKR2 hardware.
 
@@ -26,3 +35,12 @@ Set-Location "c:\git\BTT SKR2 Testing"
 ```
 
 Add `-IncludeMotion` when it is safe to execute `home` and `backoff` against the attached hardware.
+
+Run the dedicated load-cell probe-cycle bring-up path with:
+
+```powershell
+Set-Location "c:\git\BTT SKR2 Testing"
+& ".\test\run_probe_cycle.ps1" -AllowUnverifiedMotion -LoadCellConnector SKR2_DET -LoadCellSource HX711 -LoadCellThreshold 1000 -PressTargetSteps 40 -CycleCount 5
+```
+
+That script configures the load-cell path, runs `HOME`, applies `PRESSPOS`, executes `CYCLE`, and leaves the driver disabled on shutdown. Today it validates the operator path and motion routine; real HX711/ADC stop behavior still depends on the future acquisition implementation in `src/load_cell.cpp`.

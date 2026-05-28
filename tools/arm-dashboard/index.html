@@ -30,11 +30,11 @@
           </label>
           <label>
             Poll every (ms)
-            <input id="pollRateInput" type="number" min="250" step="250" value="1500">
+            <input id="pollRateInput" type="number" min="250" step="250" value="500">
           </label>
           <label class="toggle-row">
             <input id="autoPollToggle" type="checkbox" checked>
-            Auto poll status and driver
+            Auto poll live telemetry and driver
           </label>
         </div>
       </div>
@@ -92,6 +92,51 @@
           </div>
         </div>
         <canvas id="telemetryChart" width="960" height="320" aria-label="Live force and position chart"></canvas>
+      </section>
+
+      <section class="panel chart-panel span-2">
+        <div class="panel-header">
+          <h2>Load Cell Scope</h2>
+          <div class="panel-actions">
+            <button id="clearLoadCellChartButton" class="chip-button">Clear scope</button>
+          </div>
+        </div>
+        <p id="loadCellSummary" class="helper-copy">The live scope plots raw HX711 samples against the active threshold so you can squeeze the cell by hand and watch trigger events in real time.</p>
+        <div class="load-cell-meta" aria-label="Current load cell details">
+          <article class="load-cell-chip">
+            <span class="load-cell-chip-label">Source</span>
+            <strong id="loadCellSourceValue" class="load-cell-chip-value">--</strong>
+          </article>
+          <article class="load-cell-chip">
+            <span class="load-cell-chip-label">Current Raw</span>
+            <strong id="loadCellRawValue" class="load-cell-chip-value">0</strong>
+          </article>
+          <article class="load-cell-chip">
+            <span class="load-cell-chip-label">Threshold</span>
+            <strong id="loadCellThresholdValue" class="load-cell-chip-value">0</strong>
+          </article>
+          <article class="load-cell-chip">
+            <span class="load-cell-chip-label">Peak</span>
+            <strong id="loadCellPeakValue" class="load-cell-chip-value">0</strong>
+          </article>
+          <article class="load-cell-chip">
+            <span class="load-cell-chip-label">Trigger</span>
+            <strong id="loadCellTriggerValue" class="load-cell-chip-value">Clear</strong>
+          </article>
+        </div>
+        <canvas id="loadCellChart" width="960" height="320" aria-label="Live load cell raw sample chart"></canvas>
+      </section>
+
+      <section class="panel chart-panel span-2">
+        <div class="panel-header">
+          <h2>Simulated Response Curve</h2>
+          <div class="panel-actions">
+            <button id="loadSimulatedCurveButton" class="chip-button">Load exported curve</button>
+            <button id="clearResponseCurveButton" class="chip-button">Clear curve</button>
+          </div>
+        </div>
+        <p id="responseCurveSummary" class="helper-copy">Run <code>test\run_simulated_probe_workflow.ps1</code>, then load the exported curve here to preview the simulated switch/load-cell response before hardware hookup.</p>
+        <canvas id="responseCurveChart" width="960" height="320" aria-label="Simulated force versus position response curve"></canvas>
       </section>
 
       <section class="panel controls-panel">

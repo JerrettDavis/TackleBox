@@ -19,7 +19,7 @@ namespace {
 
 const uint32_t CONFIG_FLASH_ADDRESS = 0x080E0000UL;
 const uint32_t CONFIG_MAGIC = 0x4B535743UL;
-const uint16_t CONFIG_VERSION = 9U;
+const uint16_t CONFIG_VERSION = 10U;
 
 uint8_t axis_workspace_valid(const PersistedFirmwareConfig &config)
 {
@@ -60,7 +60,7 @@ MotionChannelConfig make_default_motion_channel(
     channel.travelLimitUm = 17500U;
     channel.defaultPressUm = 625U;
     channel.homeFeedrateMmPerMin = 600U;
-    channel.moveFeedrateMmPerMin = 600U;
+    channel.moveFeedrateMmPerMin = 1500U;
     channel.seekStepLimit = 7000U;
     channel.tmc2209 = {5U, 0U, 4U, 4U, 0U};
     return channel;
@@ -322,7 +322,7 @@ uint8_t boot_wait_for_usb_config(PersistedFirmwareConfig *working_config, Persis
         {
             usb_write_str("cmd: bootloader\r\n");
             usb_cdc_bridge_poll();
-            bootloader_clear_application_boot_request();
+            bootloader_request_stay_in_bootloader();
             NVIC_SystemReset();
         }
         else if (command.type == keyswitch::CommandType::Boot)
@@ -384,10 +384,13 @@ PersistedFirmwareConfig make_default_persisted_config(void)
     config.stepIntervalUs = 250U;
     config.stepPulseWidthUs = 4U;
     config.tmcUartBitUs = 52U;
-    config.allowUnverifiedTmcMotion = 0U;
+    config.allowUnverifiedTmcMotion = 1U;
     config.statusIntervalMs = 1000U;
     config.heartbeatIntervalMs = 1000U;
     config.bootHostWaitMs = 4000U;
+    config.panelColorRed = 0x30U;
+    config.panelColorGreen = 0x30U;
+    config.panelColorBlue = 0x30U;
     for (uint8_t index = 0U; index < MOTION_CHANNEL_CAPACITY; ++index)
     {
         config.motionChannels[index].seekStepLimit = axis_steps_from_um(config, config.motionChannels[index].travelLimitUm);
@@ -691,12 +694,15 @@ void emit_config_summary(const PersistedFirmwareConfig &config, const ConfigRunt
     len = snprintf(
         line,
         sizeof(line),
-        "config telemetry.status_interval_ms=%lu telemetry.heartbeat_interval_ms=%lu boot.host_wait_ms=%lu sim.load_threshold=%lu tmc.allow_unverified_motion=%lu\r\n",
+        "config telemetry.status_interval_ms=%lu telemetry.heartbeat_interval_ms=%lu boot.host_wait_ms=%lu sim.load_threshold=%lu tmc.allow_unverified_motion=%lu panel.color_rgb=%u,%u,%u\r\n",
         (unsigned long)config.statusIntervalMs,
         (unsigned long)config.heartbeatIntervalMs,
         (unsigned long)config.bootHostWaitMs,
         (unsigned long)config.loadCell.threshold,
-        (unsigned long)config.allowUnverifiedTmcMotion);
+        (unsigned long)config.allowUnverifiedTmcMotion,
+        (unsigned int)config.panelColorRed,
+        (unsigned int)config.panelColorGreen,
+        (unsigned int)config.panelColorBlue);
     if (len > 0)
     {
         usb_cdc_bridge_write(line, (uint16_t)len);

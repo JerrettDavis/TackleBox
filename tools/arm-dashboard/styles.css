@@ -266,6 +266,48 @@ h1 {
   border: 1px solid rgba(55, 33, 17, 0.1);
 }
 
+#responseCurveSummary {
+  margin-bottom: 14px;
+}
+
+#loadCellSummary {
+  margin-bottom: 14px;
+}
+
+.load-cell-meta {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.load-cell-chip {
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(55, 33, 17, 0.1);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(248, 242, 232, 0.92));
+}
+
+.load-cell-chip-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.load-cell-chip-value {
+  display: block;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 1.05rem;
+  color: var(--ink);
+}
+
+.load-cell-chip-value.is-triggered {
+  color: var(--danger);
+}
+
 .stack-form {
   display: grid;
   gap: 14px;
@@ -336,6 +378,10 @@ code {
   .telemetry-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .load-cell-meta {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 860px) {
@@ -350,6 +396,10 @@ code {
 
   .telemetry-cards {
     grid-template-columns: 1fr;
+  }
+
+  .load-cell-meta {
+    grid-template-columns: 1fr 1fr;
   }
 
   .log-line {

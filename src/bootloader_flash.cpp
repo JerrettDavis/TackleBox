@@ -131,10 +131,9 @@ extern "C" void bootloader_jump_to_application(void)
         NVIC->ICPR[index] = 0xFFFFFFFFU;
     }
 
-    HAL_RCC_DeInit();
-    HAL_DeInit();
-
     SCB->VTOR = kAppAddress;
+    __set_CONTROL(0U);
+    __set_PSP(0U);
     __set_MSP(stack_pointer);
     __DSB();
     __ISB();

@@ -74,6 +74,13 @@ $tests = @(
     @{
         Name = 'test_integration';
         Sources = $domainSources + $protocolSources + @(Join-Path $PSScriptRoot 'test_integration\test_main.cpp');
+    },
+    @{
+        Name = 'test_probe_workflow';
+        Sources = $domainSources + $protocolSources + @(
+            (Join-Path $root 'src\load_cell.cpp'),
+            (Join-Path $PSScriptRoot 'test_probe_workflow\test_main.cpp')
+        );
     }
 )
 

@@ -230,12 +230,12 @@ try {
     $safetyLines = Invoke-CommandCheck -Port $port -Command 'safety' -ReadMs 1500 -ExpectedPatterns @(
         'cmd: safety',
         '^diag0=\d+ xstop=\d+ diag2=\d+ pressed=\d+ conf=\d+ load=\d+ mech=\d+ stall=\d+ source=\d+ force=\d+ state=\d+ homed=\d+ hold=\d+ pos=-?\d+ target=-?\d+ press=-?\d+ cycles=\d+ done=\d+ backoff=\d+ seek=\d+ fault=\d+$',
-        '^sim raw=\d+ thresh=\d+ load=\d+ mech=\d+ stall=\d+$'
+        '^sim source=[^ ]+ raw=\d+ thresh=\d+ load=\d+ mech=\d+ stall=\d+$'
     )
 
     $safetyAliasLines = Invoke-CommandCheck -Port $port -Command 'm122' -ReadMs 1500 -ExpectedPatterns @(
         '^cmd: safety$',
-        '^sim raw=\d+ thresh=\d+ load=\d+ mech=\d+ stall=\d+$'
+        '^sim source=[^ ]+ raw=\d+ thresh=\d+ load=\d+ mech=\d+ stall=\d+$'
     )
 
     $holdOffLines = Invoke-CommandCheck -Port $port -Command 'hold off' -ReadMs 1500 -ExpectedPatterns @(
@@ -345,38 +345,38 @@ try {
 
     $simThreshLines = Invoke-CommandCheck -Port $port -Command 'simthresh 1000' -ReadMs 1500 -ExpectedPatterns @(
         'cmd: simthresh thresh=1000',
-        '^sim raw=\d+ thresh=1000 load=\d+ mech=\d+ stall=\d+$'
+        '^sim source=[^ ]+ raw=\d+ thresh=1000 load=\d+ mech=\d+ stall=\d+$'
     )
 
     $simLoadLines = Invoke-CommandCheck -Port $port -Command 'simload 1200' -ReadMs 1500 -ExpectedPatterns @(
         'cmd: simload raw=1200',
-        '^sim raw=1200 thresh=1000 load=1 mech=\d+ stall=\d+$'
+        '^sim source=[^ ]+ raw=1200 thresh=1000 load=1 mech=\d+ stall=\d+$'
     )
 
     $simSafetyLines = Invoke-CommandCheck -Port $port -Command 'safety' -ReadMs 1500 -ExpectedPatterns @(
         'cmd: safety',
         '^diag0=\d+ xstop=\d+ diag2=\d+ pressed=\d+ conf=\d+ load=1 mech=\d+ stall=\d+ source=\d+ force=1200 state=\d+ homed=\d+ hold=\d+ pos=-?\d+ target=-?\d+ press=-?\d+ cycles=\d+ done=\d+ backoff=\d+ seek=\d+ fault=\d+$',
-        '^sim raw=1200 thresh=1000 load=1 mech=\d+ stall=\d+$'
+        '^sim source=[^ ]+ raw=1200 thresh=1000 load=1 mech=\d+ stall=\d+$'
     )
 
     $simMechLines = Invoke-CommandCheck -Port $port -Command 'simmech on' -ReadMs 1500 -ExpectedPatterns @(
         '^cmd: simmech value=1$',
-        '^sim raw=1200 thresh=1000 load=1 mech=1 stall=\d+$'
+        '^sim source=[^ ]+ raw=1200 thresh=1000 load=1 mech=1 stall=\d+$'
     )
 
     $simStallLines = Invoke-CommandCheck -Port $port -Command 'simstall on' -ReadMs 1500 -ExpectedPatterns @(
         '^cmd: simstall value=1$',
-        '^sim raw=1200 thresh=1000 load=1 mech=1 stall=1$'
+        '^sim source=[^ ]+ raw=1200 thresh=1000 load=1 mech=1 stall=1$'
     )
 
     $simSafetyLatchedLines = Invoke-CommandCheck -Port $port -Command 'safety' -ReadMs 1500 -ExpectedPatterns @(
         '^cmd: safety$',
-        '^sim raw=1200 thresh=1000 load=1 mech=1 stall=1$'
+        '^sim source=[^ ]+ raw=1200 thresh=1000 load=1 mech=1 stall=1$'
     )
 
     $simClearLines = Invoke-CommandCheck -Port $port -Command 'simclear' -ReadMs 1500 -ExpectedPatterns @(
         'cmd: simclear',
-        '^sim raw=0 thresh=1000 load=0 mech=0 stall=0$'
+        '^sim source=[^ ]+ raw=0 thresh=1000 load=0 mech=0 stall=0$'
     )
 
     $stopLines = Invoke-CommandCheck -Port $port -Command 'stop' -ReadMs 1500 -ExpectedPatterns @(

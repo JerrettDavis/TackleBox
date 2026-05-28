@@ -273,7 +273,7 @@ MotionOutputs tickMotion(
         {
             if (inputs.stepIssued != 0U)
             {
-                ++state->seekSteps;
+                state->seekSteps += inputs.stepIssued;
                 if (state->seekSteps > config.seekStepLimit)
                 {
                     state->homingState = HomingState::Fault;
@@ -299,7 +299,9 @@ MotionOutputs tickMotion(
 
         if ((inputs.stepIssued != 0U) && (state->backoffStepsRemaining > 0U))
         {
-            --state->backoffStepsRemaining;
+            state->backoffStepsRemaining = (inputs.stepIssued >= state->backoffStepsRemaining)
+                                               ? 0U
+                                               : (uint32_t)(state->backoffStepsRemaining - inputs.stepIssued);
         }
 
         if (state->backoffStepsRemaining > 0U)
@@ -359,7 +361,7 @@ MotionOutputs tickMotion(
 
         if (inputs.stepIssued != 0U)
         {
-            state->currentPosition += (towards_positive != 0U) ? 1 : -1;
+            state->currentPosition += (towards_positive != 0U) ? (int32_t)inputs.stepIssued : -(int32_t)inputs.stepIssued;
         }
 
         if (state->currentPosition == state->targetPosition)

@@ -39,6 +39,8 @@ enum class CommandType : uint8_t {
     SimMechanical,
     SimStall,
     SimClear,
+    Tare,
+    PanelPins,
     Home,
     Stop,
     Backoff,

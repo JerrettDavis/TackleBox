@@ -89,6 +89,71 @@ function Get-BoardUsbState {
     }
 }
 
+function Wait-BoardUsbState {
+    param(
+        [ValidateSet('application', 'bootloader', 'any')]
+        [string]$Mode = 'any',
+        [int]$WaitMs = 8000,
+        [int]$PollMs = 250
+    )
+
+    $deadline = [Environment]::TickCount + $WaitMs
+    do {
+        $state = Get-BoardUsbState
+
+        switch ($Mode) {
+            'application' {
+                if ($state.ApplicationPort) {
+                    return $state
+                }
+            }
+            'bootloader' {
+                if ($state.BootloaderPort) {
+                    return $state
+                }
+            }
+            default {
+                if ($state.ApplicationPort -or $state.BootloaderPort) {
+                    return $state
+                }
+            }
+        }
+
+        if ($WaitMs -le 0) {
+            break
+        }
+
+        Start-Sleep -Milliseconds $PollMs
+    }
+    while ([Environment]::TickCount -lt $deadline)
+
+    return Get-BoardUsbState
+}
+
+function Wait-BoardUsbAbsent {
+    param(
+        [int]$WaitMs = 8000,
+        [int]$PollMs = 250
+    )
+
+    $deadline = [Environment]::TickCount + $WaitMs
+    do {
+        $state = Get-BoardUsbState
+        if ((-not $state.ApplicationPort) -and (-not $state.BootloaderPort)) {
+            return $state
+        }
+
+        if ($WaitMs -le 0) {
+            break
+        }
+
+        Start-Sleep -Milliseconds $PollMs
+    }
+    while ([Environment]::TickCount -lt $deadline)
+
+    return Get-BoardUsbState
+}
+
 function Open-UsbSerialPort {
     param(
         [Parameter(Mandatory = $true)]

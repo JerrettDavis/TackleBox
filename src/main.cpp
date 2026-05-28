@@ -1,4 +1,6 @@
 #include "app_board.h"
+#include "app_display.h"
+#include "app_panel.h"
 #include "boot_mode.h"
 #include "app_config.h"
 #include "app_runtime_config.h"
@@ -17,11 +19,72 @@
 
 static PersistedFirmwareConfig g_persisted_config = {};
 static ConfigRuntimeState g_config_state = {};
+static const Mini12864PanelPins g_panel_pins = mini12864_panel_pins();
+static Mini12864PanelInputs g_panel_inputs = {};
+static void configure_load_cell_io(const LoadCellConfig &config);
+
+static void emit_panel_pins_line(void)
+{
+    const PinAssignment exp1_01 = {(uint8_t)GpioPortId::C, 5U};
+    const PinAssignment exp1_02 = {(uint8_t)GpioPortId::B, 0U};
+    const PinAssignment exp1_03 = {(uint8_t)GpioPortId::B, 1U};
+    const PinAssignment exp1_04 = {(uint8_t)GpioPortId::E, 9U};
+    const PinAssignment exp1_05 = {(uint8_t)GpioPortId::E, 10U};
+    const PinAssignment exp1_06 = {(uint8_t)GpioPortId::E, 11U};
+    const PinAssignment exp1_07 = {(uint8_t)GpioPortId::E, 12U};
+    const PinAssignment exp1_08 = {(uint8_t)GpioPortId::E, 13U};
+    const PinAssignment exp2_01 = {(uint8_t)GpioPortId::A, 6U};
+    const PinAssignment exp2_02 = {(uint8_t)GpioPortId::A, 5U};
+    const PinAssignment exp2_03 = {(uint8_t)GpioPortId::E, 7U};
+    const PinAssignment exp2_04 = {(uint8_t)GpioPortId::A, 4U};
+    const PinAssignment exp2_05 = {(uint8_t)GpioPortId::B, 2U};
+    const PinAssignment exp2_06 = {(uint8_t)GpioPortId::A, 7U};
+    const PinAssignment exp2_07 = {(uint8_t)GpioPortId::C, 4U};
+
+    enable_gpio_clock((uint8_t)GpioPortId::A);
+    enable_gpio_clock((uint8_t)GpioPortId::B);
+    enable_gpio_clock((uint8_t)GpioPortId::C);
+    enable_gpio_clock((uint8_t)GpioPortId::E);
+    __DSB();
+
+    char line[320];
+    const int len = snprintf(
+        line,
+        sizeof(line),
+        "panel exp1_01_pc5=%lu exp1_02_pb0=%lu exp1_03_pb1=%lu exp1_04_pe9=%lu exp1_05_pe10=%lu exp1_06_pe11=%lu exp1_07_pe12=%lu exp1_08_pe13=%lu exp2_01_pa6=%lu exp2_02_pa5=%lu exp2_03_pe7=%lu exp2_04_pa4=%lu exp2_05_pb2=%lu exp2_06_pa7=%lu exp2_07_pc4=%lu\r\n",
+        (unsigned long)pin_read(exp1_01),
+        (unsigned long)pin_read(exp1_02),
+        (unsigned long)pin_read(exp1_03),
+        (unsigned long)pin_read(exp1_04),
+        (unsigned long)pin_read(exp1_05),
+        (unsigned long)pin_read(exp1_06),
+        (unsigned long)pin_read(exp1_07),
+        (unsigned long)pin_read(exp1_08),
+        (unsigned long)pin_read(exp2_01),
+        (unsigned long)pin_read(exp2_02),
+        (unsigned long)pin_read(exp2_03),
+        (unsigned long)pin_read(exp2_04),
+        (unsigned long)pin_read(exp2_05),
+        (unsigned long)pin_read(exp2_06),
+        (unsigned long)pin_read(exp2_07));
+    if (len > 0)
+    {
+        usb_cdc_bridge_write(line, (uint16_t)len);
+    }
+}
 
 static uint8_t same_text_case_sensitive(const char *lhs, const char *rhs)
 {
     return strcmp(lhs, rhs) == 0 ? 1U : 0U;
 }
+
+enum TmcSyncRequestFlags : uint8_t {
+    TmcSyncNone = 0U,
+    TmcSyncApply = 1U << 0,
+    TmcSyncVerify = 1U << 1,
+};
+
+static uint8_t g_tmc_sync_pending = TmcSyncNone;
 
 static uint8_t parse_u32_cstr(const char *text, uint32_t *value)
 {
@@ -409,12 +472,15 @@ static void emit_indexed_channel_summary(const PersistedFirmwareConfig &config, 
     len = snprintf(
         line,
         sizeof(line),
-        "config telemetry.status_interval_ms=%lu telemetry.heartbeat_interval_ms=%lu boot.host_wait_ms=%lu sim.load_threshold=%lu tmc.allow_unverified_motion=%lu\r\n",
+        "config telemetry.status_interval_ms=%lu telemetry.heartbeat_interval_ms=%lu boot.host_wait_ms=%lu sim.load_threshold=%lu tmc.allow_unverified_motion=%lu panel.color_rgb=%u,%u,%u\r\n",
         (unsigned long)config.statusIntervalMs,
         (unsigned long)config.heartbeatIntervalMs,
         (unsigned long)config.bootHostWaitMs,
         (unsigned long)config.loadCell.threshold,
-        (unsigned long)config.allowUnverifiedTmcMotion);
+        (unsigned long)config.allowUnverifiedTmcMotion,
+        (unsigned int)config.panelColorRed,
+        (unsigned int)config.panelColorGreen,
+        (unsigned int)config.panelColorBlue);
     if (len > 0)
     {
         usb_cdc_bridge_write(line, (uint16_t)len);
@@ -441,6 +507,47 @@ static uint8_t tmc_motion_allowed(void)
     return (x_tmc_verified() != 0U) || (g_persisted_config.allowUnverifiedTmcMotion != 0U);
 }
 
+static uint8_t motion_state_busy_local(const keyswitch::MotionState &state)
+{
+    return ((state.homingState == keyswitch::HomingState::Seek) ||
+            (state.homingState == keyswitch::HomingState::Backoff) ||
+            (state.homingState == keyswitch::HomingState::MoveToTarget) ||
+            (state.homingState == keyswitch::HomingState::CycleToPress) ||
+            (state.homingState == keyswitch::HomingState::CycleToHome))
+               ? 1U
+               : 0U;
+}
+
+static void request_tmc_sync(uint8_t flags)
+{
+    g_tmc_sync_pending = (uint8_t)(g_tmc_sync_pending | flags);
+}
+
+static void service_tmc_sync(keyswitch::MotionState *motion_state)
+{
+    if ((motion_state == 0) || (g_tmc_sync_pending == TmcSyncNone) || (motion_state_busy_local(*motion_state) != 0U))
+    {
+        return;
+    }
+
+    const uint8_t pending = g_tmc_sync_pending;
+    g_tmc_sync_pending = TmcSyncNone;
+
+    if ((pending & TmcSyncApply) != 0U)
+    {
+        x_tmc2209_apply_config(g_persisted_config);
+    }
+    else if ((pending & TmcSyncVerify) != 0U)
+    {
+        x_tmc2209_refresh_verification(g_persisted_config);
+    }
+
+    if (tmc_motion_allowed() == 0U)
+    {
+        keyswitch::setHoldEnabled(motion_state, 0U);
+    }
+}
+
 static uint8_t parse_pin_assignment(const char *text, PinAssignment *pin)
 {
     if ((text == 0) || (pin == 0) || (text[0] != 'P'))
@@ -459,6 +566,30 @@ static uint8_t parse_pin_assignment(const char *text, PinAssignment *pin)
     pin->portId = (uint8_t)((text[1] - 'A') + (uint8_t)GpioPortId::A);
     pin->pin = (uint8_t)pin_number;
     return pin_assignment_valid(*pin);
+}
+
+static uint8_t same_pin_assignment(const PinAssignment &lhs, const PinAssignment &rhs)
+{
+    return (lhs.portId == rhs.portId) && (lhs.pin == rhs.pin) ? 1U : 0U;
+}
+
+static uint8_t led_pin_conflicts_with_load_cell(const PersistedFirmwareConfig &config)
+{
+    if ((uint8_t)config.loadCell.source != (uint8_t)LoadCellSourceKind::Hx711)
+    {
+        return 0U;
+    }
+
+    if ((pin_assignment_valid(config.loadCell.pins.data) == 0U) ||
+        (pin_assignment_valid(config.loadCell.pins.clock) == 0U))
+    {
+        return 0U;
+    }
+
+    return (same_pin_assignment(config.pins.led, config.loadCell.pins.data) != 0U) ||
+           (same_pin_assignment(config.pins.led, config.loadCell.pins.clock) != 0U)
+               ? 1U
+               : 0U;
 }
 
 static uint8_t axis_default_press_within_workspace(int32_t min_um, uint32_t span_um, uint32_t default_press_um)
@@ -493,12 +624,21 @@ static void usb_write_str(const char *s)
 }
 
 struct StepScheduler {
-    uint32_t pulseStartedCycle;
-    uint32_t lastStepCycle;
-    uint32_t stepIntervalCycles;
-    uint32_t pulseWidthCycles;
+    uint32_t lastStepTickUs;
+    uint32_t stepIntervalUs;
+    uint32_t pulseWidthUs;
     uint8_t pulseHigh;
-    uint8_t issuedLatch;
+    uint8_t issuedCount;
+    uint8_t runRequested;
+};
+
+struct RuntimeMonitor {
+    uint32_t lastLoopUs;
+    uint32_t lastLoopDeltaUs;
+    uint32_t maxLoopDeltaUs;
+    uint32_t emittedStepsTotal;
+    uint32_t emittedStepsSinceHeartbeat;
+    uint8_t maxStepBurstSinceHeartbeat;
 };
 
 static LoadCellRuntime g_load_cell = load_cell_make_default(1000U);
@@ -507,10 +647,90 @@ static StepScheduler g_step_scheduler = {
     0U,
     0U,
     1U,
-    1U,
+    0U,
     0U,
     0U,
 };
+
+static RuntimeMonitor g_runtime_monitor = {
+    0U,
+    0U,
+    0U,
+    0U,
+    0U,
+    0U,
+};
+
+static uint32_t step_scheduler_timer_now_us(void)
+{
+    return TIM5->CNT;
+}
+
+static void step_scheduler_timer_disarm(void)
+{
+    TIM5->DIER &= ~TIM_DIER_CC1IE;
+}
+
+static void step_scheduler_timer_arm_us(uint32_t delay_us)
+{
+    const uint32_t now_us = step_scheduler_timer_now_us();
+    TIM5->CCR1 = now_us + ((delay_us == 0U) ? 1U : delay_us);
+    TIM5->SR &= ~TIM_SR_CC1IF;
+    TIM5->DIER |= TIM_DIER_CC1IE;
+}
+
+static void step_scheduler_schedule_locked(void)
+{
+    if ((g_step_scheduler.runRequested == 0U) || (g_step_scheduler.pulseHigh != 0U))
+    {
+        return;
+    }
+
+    const uint32_t now_us = step_scheduler_timer_now_us();
+    const uint32_t elapsed_us = now_us - g_step_scheduler.lastStepTickUs;
+    const uint32_t delay_us = (elapsed_us >= g_step_scheduler.stepIntervalUs) ? 1U : (g_step_scheduler.stepIntervalUs - elapsed_us);
+    step_scheduler_timer_arm_us(delay_us);
+}
+
+extern "C" void TIM5_IRQHandler(void)
+{
+    if ((TIM5->SR & TIM_SR_CC1IF) == 0U)
+    {
+        return;
+    }
+
+    TIM5->SR &= ~TIM_SR_CC1IF;
+
+    if (g_step_scheduler.pulseHigh != 0U)
+    {
+        pin_write_low(active_motion_channel(g_persisted_config).pins.step);
+        g_step_scheduler.pulseHigh = 0U;
+        if (g_step_scheduler.runRequested != 0U)
+        {
+            step_scheduler_schedule_locked();
+        }
+        else
+        {
+            step_scheduler_timer_disarm();
+        }
+        return;
+    }
+
+    if (g_step_scheduler.runRequested == 0U)
+    {
+        step_scheduler_timer_disarm();
+        return;
+    }
+
+    pin_write_high(active_motion_channel(g_persisted_config).pins.step);
+    g_step_scheduler.pulseHigh = 1U;
+    if (g_step_scheduler.issuedCount < 0xFFU)
+    {
+        ++g_step_scheduler.issuedCount;
+    }
+    g_step_scheduler.lastStepTickUs = step_scheduler_timer_now_us();
+    step_scheduler_timer_arm_us(g_step_scheduler.pulseWidthUs);
+}
 
 static uint32_t step_interval_us_from_feedrate_mm_per_min(const PersistedFirmwareConfig &config, uint32_t feedrate_mm_per_min)
 {
@@ -620,70 +840,161 @@ static uint32_t cycles_from_us(uint32_t microseconds)
     return (cycles == 0ULL) ? 1U : (uint32_t)cycles;
 }
 
-static void enable_cycle_counter(void)
+static uint32_t timer_clock_hz_apb1(void)
 {
-    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-    DWT->CYCCNT = 0U;
-    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    const uint32_t pclk1_hz = HAL_RCC_GetPCLK1Freq();
+    return ((RCC->CFGR & RCC_CFGR_PPRE1) == 0U) ? pclk1_hz : (pclk1_hz * 2U);
 }
 
-static uint32_t cycle_counter_now(void)
+static void step_scheduler_timer_init(void)
 {
-    return DWT->CYCCNT;
+    RCC->APB1ENR |= RCC_APB1ENR_TIM5EN;
+    __DSB();
+
+    TIM5->CR1 = 0U;
+    TIM5->CR2 = 0U;
+    TIM5->SMCR = 0U;
+    TIM5->DIER = 0U;
+    TIM5->CCER = 0U;
+    TIM5->CCMR1 = 0U;
+    TIM5->CCMR2 = 0U;
+    TIM5->PSC = (uint32_t)((timer_clock_hz_apb1() / 1000000U) - 1U);
+    TIM5->ARR = 0xFFFFFFFFU;
+    TIM5->CNT = 0U;
+    TIM5->EGR = TIM_EGR_UG;
+    TIM5->SR = 0U;
+    TIM5->CR1 = TIM_CR1_CEN;
+
+    HAL_NVIC_SetPriority(TIM5_IRQn, 3U, 0U);
+    HAL_NVIC_EnableIRQ(TIM5_IRQn);
 }
 
 static void step_scheduler_init(void)
 {
-    g_step_scheduler.pulseStartedCycle = 0U;
-    g_step_scheduler.lastStepCycle = 0U;
-    g_step_scheduler.stepIntervalCycles = cycles_from_us(step_interval_us_from_feedrate_mm_per_min(g_persisted_config, current_motion_channel_const().moveFeedrateMmPerMin));
-    g_step_scheduler.pulseWidthCycles = cycles_from_us(g_persisted_config.stepPulseWidthUs);
+    g_step_scheduler.lastStepTickUs = step_scheduler_timer_now_us();
+    g_step_scheduler.stepIntervalUs = step_interval_us_from_feedrate_mm_per_min(g_persisted_config, current_motion_channel_const().moveFeedrateMmPerMin);
+    g_step_scheduler.pulseWidthUs = g_persisted_config.stepPulseWidthUs;
     g_step_scheduler.pulseHigh = 0U;
-    g_step_scheduler.issuedLatch = 0U;
+    g_step_scheduler.issuedCount = 0U;
+    g_step_scheduler.runRequested = 0U;
+    step_scheduler_timer_disarm();
     pin_write_low(current_motion_channel_const().pins.step);
 }
 
 static void step_scheduler_service(uint32_t now_cycles)
 {
-    if ((g_step_scheduler.pulseHigh != 0U) &&
-        ((uint32_t)(now_cycles - g_step_scheduler.pulseStartedCycle) >= g_step_scheduler.pulseWidthCycles))
-    {
-        pin_write_low(current_motion_channel_const().pins.step);
-        g_step_scheduler.pulseHigh = 0U;
-    }
+    (void)now_cycles;
 }
 
 static uint8_t step_scheduler_take_issued_step(void)
 {
-    const uint8_t issued = g_step_scheduler.issuedLatch;
-    g_step_scheduler.issuedLatch = 0U;
+    __disable_irq();
+    const uint8_t issued = g_step_scheduler.issuedCount;
+    g_step_scheduler.issuedCount = 0U;
+    __enable_irq();
     return issued;
 }
 
 static void step_scheduler_reset(void)
 {
+    __disable_irq();
+    step_scheduler_timer_disarm();
     pin_write_low(current_motion_channel_const().pins.step);
     g_step_scheduler.pulseHigh = 0U;
-    g_step_scheduler.issuedLatch = 0U;
+    g_step_scheduler.issuedCount = 0U;
+    g_step_scheduler.runRequested = 0U;
+    g_step_scheduler.lastStepTickUs = step_scheduler_timer_now_us();
+    __enable_irq();
 }
 
-static void step_scheduler_request_step(uint32_t now_cycles)
+static void step_scheduler_set_run_requested(uint8_t run_requested)
 {
-    if (g_step_scheduler.pulseHigh != 0U)
+    __disable_irq();
+    g_step_scheduler.runRequested = (uint8_t)(run_requested != 0U ? 1U : 0U);
+    if (g_step_scheduler.runRequested != 0U)
+    {
+        step_scheduler_schedule_locked();
+    }
+    else if (g_step_scheduler.pulseHigh == 0U)
+    {
+        step_scheduler_timer_disarm();
+    }
+    __enable_irq();
+}
+
+static void runtime_monitor_record_loop(uint32_t now_us)
+{
+    if (g_runtime_monitor.lastLoopUs != 0U)
+    {
+        const uint32_t loop_delta_us = now_us - g_runtime_monitor.lastLoopUs;
+        g_runtime_monitor.lastLoopDeltaUs = loop_delta_us;
+        if (loop_delta_us > g_runtime_monitor.maxLoopDeltaUs)
+        {
+            g_runtime_monitor.maxLoopDeltaUs = loop_delta_us;
+        }
+    }
+
+    g_runtime_monitor.lastLoopUs = now_us;
+}
+
+static void runtime_monitor_record_steps(uint8_t step_count)
+{
+    if (step_count == 0U)
     {
         return;
     }
 
-    if ((uint32_t)(now_cycles - g_step_scheduler.lastStepCycle) < g_step_scheduler.stepIntervalCycles)
+    g_runtime_monitor.emittedStepsTotal += step_count;
+    g_runtime_monitor.emittedStepsSinceHeartbeat += step_count;
+    if (step_count > g_runtime_monitor.maxStepBurstSinceHeartbeat)
     {
+        g_runtime_monitor.maxStepBurstSinceHeartbeat = step_count;
+    }
+}
+
+static void runtime_monitor_roll_heartbeat_window(void)
+{
+    g_runtime_monitor.emittedStepsSinceHeartbeat = 0U;
+    g_runtime_monitor.maxLoopDeltaUs = 0U;
+    g_runtime_monitor.maxStepBurstSinceHeartbeat = 0U;
+}
+
+static void apply_motion_outputs(const keyswitch::MotionOutputs &outputs, uint32_t now_cycles)
+{
+    (void)now_cycles;
+    if (outputs.dirHigh != 0U)
+    {
+        pin_write_high(current_motion_channel_const().pins.dir);
+    }
+    else
+    {
+        pin_write_low(current_motion_channel_const().pins.dir);
+    }
+
+    if (outputs.driverEnable != 0U)
+    {
+        x_driver_enable(g_persisted_config);
+    }
+    else
+    {
+        x_driver_disable(g_persisted_config);
+        step_scheduler_reset();
         return;
     }
 
-    pin_write_high(current_motion_channel_const().pins.step);
-    g_step_scheduler.pulseHigh = 1U;
-    g_step_scheduler.pulseStartedCycle = now_cycles;
-    g_step_scheduler.lastStepCycle = now_cycles;
-    g_step_scheduler.issuedLatch = 1U;
+    step_scheduler_set_run_requested(outputs.issueStep);
+
+    if (led_pin_conflicts_with_load_cell(g_persisted_config) == 0U)
+    {
+        if (outputs.ledOn != 0U)
+        {
+            pin_write_high(g_persisted_config.pins.led);
+        }
+        else
+        {
+            pin_write_low(g_persisted_config.pins.led);
+        }
+    }
 }
 
 static keyswitch::MotionConfig make_motion_config(const PersistedFirmwareConfig &config)
@@ -839,6 +1150,12 @@ static ApplyConfigResult apply_config_key_value(
         config->loadCell.connector = (uint8_t)LoadCellConnectorKind::Custom;
         result.accepted = 1U;
         result.rebootRequired = 1U;
+        if (apply_live != 0U)
+        {
+            load_cell_clear(&g_load_cell);
+            load_cell_apply_config(&g_load_cell, config->loadCell);
+            configure_load_cell_io(config->loadCell);
+        }
     }
     else if (same_text_case_sensitive(key, "PIN.LOADCELL_CLOCK") && parse_pin_assignment(value, &pin))
     {
@@ -846,6 +1163,12 @@ static ApplyConfigResult apply_config_key_value(
         config->loadCell.connector = (uint8_t)LoadCellConnectorKind::Custom;
         result.accepted = 1U;
         result.rebootRequired = 1U;
+        if (apply_live != 0U)
+        {
+            load_cell_clear(&g_load_cell);
+            load_cell_apply_config(&g_load_cell, config->loadCell);
+            configure_load_cell_io(config->loadCell);
+        }
     }
     else if (same_text_case_sensitive(key, "LOGIC.STOP_ACTIVE_HIGH") && parse_bool_cstr(value, &bool_value))
     {
@@ -909,6 +1232,12 @@ static ApplyConfigResult apply_config_key_value(
         config->loadCell.source = enum_value;
         result.accepted = 1U;
         result.rebootRequired = 1U;
+        if (apply_live != 0U)
+        {
+            load_cell_clear(&g_load_cell);
+            load_cell_apply_config(&g_load_cell, config->loadCell);
+            configure_load_cell_io(config->loadCell);
+        }
     }
     else if (same_text_case_sensitive(key, "LOADCELL.CONNECTOR") && load_cell_connector_from_cstr(value, &enum_value))
     {
@@ -917,7 +1246,9 @@ static ApplyConfigResult apply_config_key_value(
         result.rebootRequired = 1U;
         if (apply_live != 0U)
         {
-            load_cell_set_threshold(&g_load_cell, config->loadCell.threshold);
+            load_cell_clear(&g_load_cell);
+            load_cell_apply_config(&g_load_cell, config->loadCell);
+            configure_load_cell_io(config->loadCell);
         }
     }
     else if ((same_text_case_sensitive(key, "LOADCELL.THRESHOLD") || same_text_case_sensitive(key, "SIM.LOAD_THRESHOLD")) && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 > 0U))
@@ -926,7 +1257,7 @@ static ApplyConfigResult apply_config_key_value(
         result.accepted = 1U;
         if (apply_live != 0U)
         {
-            load_cell_set_threshold(&g_load_cell, parsed_u32);
+            load_cell_apply_config(&g_load_cell, config->loadCell);
         }
     }
     else if (same_text_case_sensitive(key, "MOTION.SEEK_LIMIT_STEPS") && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 > 0U))
@@ -966,7 +1297,7 @@ static ApplyConfigResult apply_config_key_value(
         result.accepted = 1U;
         if ((apply_live != 0U) && (motion_state != 0))
         {
-            g_step_scheduler.stepIntervalCycles = cycles_from_us(active_step_interval_us_for_state(*config, *motion_state));
+            g_step_scheduler.stepIntervalUs = active_step_interval_us_for_state(*config, *motion_state);
         }
     }
     else if (same_text_case_sensitive(key, "MOTION.HOME_FEEDRATE_MM_PER_MIN") && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 > 0U))
@@ -975,7 +1306,7 @@ static ApplyConfigResult apply_config_key_value(
         result.accepted = 1U;
         if ((apply_live != 0U) && (motion_state != 0))
         {
-            g_step_scheduler.stepIntervalCycles = cycles_from_us(active_step_interval_us_for_state(*config, *motion_state));
+            g_step_scheduler.stepIntervalUs = active_step_interval_us_for_state(*config, *motion_state);
         }
     }
     else if (same_text_case_sensitive(key, "MOTION.MOVE_FEEDRATE_MM_PER_MIN") && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 > 0U))
@@ -984,7 +1315,7 @@ static ApplyConfigResult apply_config_key_value(
         result.accepted = 1U;
         if ((apply_live != 0U) && (motion_state != 0))
         {
-            g_step_scheduler.stepIntervalCycles = cycles_from_us(active_step_interval_us_for_state(*config, *motion_state));
+            g_step_scheduler.stepIntervalUs = active_step_interval_us_for_state(*config, *motion_state);
         }
     }
     else if (same_text_case_sensitive(key, "MOTION.STEP_PULSE_US") && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 > 0U))
@@ -993,13 +1324,40 @@ static ApplyConfigResult apply_config_key_value(
         result.accepted = 1U;
         if (apply_live != 0U)
         {
-            g_step_scheduler.pulseWidthCycles = cycles_from_us(config->stepPulseWidthUs);
+            g_step_scheduler.pulseWidthUs = config->stepPulseWidthUs;
         }
     }
     else if (same_text_case_sensitive(key, "BOOT.HOST_WAIT_MS") && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 <= 30000U))
     {
         config->bootHostWaitMs = parsed_u32;
         result.accepted = 1U;
+    }
+    else if (same_text_case_sensitive(key, "PANEL.COLOR_RED") && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 <= 255U))
+    {
+        config->panelColorRed = (uint8_t)parsed_u32;
+        result.accepted = 1U;
+        if (apply_live != 0U)
+        {
+            mini12864_panel_set_color(g_panel_pins, config->panelColorRed, config->panelColorGreen, config->panelColorBlue);
+        }
+    }
+    else if (same_text_case_sensitive(key, "PANEL.COLOR_GREEN") && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 <= 255U))
+    {
+        config->panelColorGreen = (uint8_t)parsed_u32;
+        result.accepted = 1U;
+        if (apply_live != 0U)
+        {
+            mini12864_panel_set_color(g_panel_pins, config->panelColorRed, config->panelColorGreen, config->panelColorBlue);
+        }
+    }
+    else if (same_text_case_sensitive(key, "PANEL.COLOR_BLUE") && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 <= 255U))
+    {
+        config->panelColorBlue = (uint8_t)parsed_u32;
+        result.accepted = 1U;
+        if (apply_live != 0U)
+        {
+            mini12864_panel_set_color(g_panel_pins, config->panelColorRed, config->panelColorGreen, config->panelColorBlue);
+        }
     }
     else if (same_text_case_sensitive(key, "AXIS.STEPS_PER_ROTATION") && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 > 0U))
     {
@@ -1107,7 +1465,7 @@ static ApplyConfigResult apply_config_key_value(
         if (apply_live != 0U)
         {
             tmc_driver_runtime().tmc2209.irun = channel.tmc2209.irun;
-            x_tmc2209_apply_config(*config);
+            request_tmc_sync(TmcSyncApply);
         }
     }
     else if (same_text_case_sensitive(key, "TMC.IHOLD") && parse_u32_cstr(value, &parsed_u32))
@@ -1117,7 +1475,7 @@ static ApplyConfigResult apply_config_key_value(
         if (apply_live != 0U)
         {
             tmc_driver_runtime().tmc2209.ihold = channel.tmc2209.ihold;
-            x_tmc2209_apply_config(*config);
+            request_tmc_sync(TmcSyncApply);
         }
     }
     else if (same_text_case_sensitive(key, "TMC.IHOLDDELAY") && parse_u32_cstr(value, &parsed_u32))
@@ -1127,7 +1485,7 @@ static ApplyConfigResult apply_config_key_value(
         if (apply_live != 0U)
         {
             tmc_driver_runtime().tmc2209.iholddelay = channel.tmc2209.iholddelay;
-            x_tmc2209_apply_config(*config);
+            request_tmc_sync(TmcSyncApply);
         }
     }
     else if (same_text_case_sensitive(key, "TMC.TPOWERDOWN") && parse_u32_cstr(value, &parsed_u32))
@@ -1137,7 +1495,7 @@ static ApplyConfigResult apply_config_key_value(
         if (apply_live != 0U)
         {
             tmc_driver_runtime().tmc2209.tpowerdown = channel.tmc2209.tpowerdown;
-            x_tmc2209_apply_config(*config);
+            request_tmc_sync(TmcSyncApply);
         }
     }
     else if (same_text_case_sensitive(key, "TMC.SGTHRS") && parse_u32_cstr(value, &parsed_u32))
@@ -1147,7 +1505,7 @@ static ApplyConfigResult apply_config_key_value(
         if (apply_live != 0U)
         {
             tmc_driver_runtime().tmc2209.sgthrs = channel.tmc2209.sgthrs;
-            x_tmc2209_apply_config(*config);
+            request_tmc_sync(TmcSyncApply);
         }
     }
 
@@ -1202,11 +1560,11 @@ static void emit_status_line(
     const keyswitch::MotionState &state,
     const keyswitch::MotionOutputs &outputs)
 {
-    char line[256];
+    char line[448];
     int len = snprintf(
         line,
         sizeof(line),
-        "diag0=%lu xstop=%lu diag2=%lu pressed=%lu conf=%lu load=%lu mech=%lu stall=%lu source=%lu force=%lu state=%lu homed=%lu hold=%lu pos=%ld target=%ld press=%ld cycles=%lu done=%lu backoff=%lu seek=%lu fault=%lu\r\n",
+        "diag0=%lu xstop=%lu diag2=%lu pressed=%lu conf=%lu load=%lu mech=%lu stall=%lu source=%lu force=%lu state=%lu homed=%lu hold=%lu pos=%ld target=%ld press=%ld cycles=%lu done=%lu backoff=%lu seek=%lu fault=%lu ui_click=%lu ui_a=%lu ui_b=%lu loop_last_us=%lu loop_max_us=%lu steps_total=%lu steps_hb=%lu steps_burst=%u tmc_sync=%u\r\n",
         (unsigned long)inputs.rawDiag0,
         (unsigned long)inputs.rawXStop,
         (unsigned long)inputs.rawDiag2,
@@ -1227,7 +1585,16 @@ static void emit_status_line(
         (unsigned long)state.completedCycles,
         (unsigned long)state.backoffStepsRemaining,
         (unsigned long)state.seekSteps,
-        (unsigned long)state.faultLatch);
+        (unsigned long)state.faultLatch,
+        (unsigned long)g_panel_inputs.clickPressed,
+        (unsigned long)g_panel_inputs.encoderAActive,
+        (unsigned long)g_panel_inputs.encoderBActive,
+        (unsigned long)g_runtime_monitor.lastLoopDeltaUs,
+        (unsigned long)g_runtime_monitor.maxLoopDeltaUs,
+        (unsigned long)g_runtime_monitor.emittedStepsTotal,
+        (unsigned long)g_runtime_monitor.emittedStepsSinceHeartbeat,
+        (unsigned int)g_runtime_monitor.maxStepBurstSinceHeartbeat,
+        (unsigned int)g_tmc_sync_pending);
     if (len > 0)
     {
         usb_cdc_bridge_write(line, (uint16_t)len);
@@ -1239,11 +1606,11 @@ static void emit_heartbeat_line(
     const keyswitch::MotionState &state,
     const keyswitch::MotionOutputs &outputs)
 {
-    char line[192];
+    char line[352];
     int len = snprintf(
         line,
         sizeof(line),
-        "heartbeat count=%lu ms=%lu state=%lu pressed=%lu load=%lu mech=%lu stall=%lu source=%lu homed=%lu hold=%lu pos=%ld target=%ld fault=%lu\r\n",
+        "heartbeat count=%lu ms=%lu state=%lu pressed=%lu load=%lu mech=%lu stall=%lu source=%lu homed=%lu hold=%lu pos=%ld target=%ld fault=%lu ui_click=%lu ui_a=%lu ui_b=%lu loop_last_us=%lu loop_max_us=%lu steps_total=%lu steps_hb=%lu steps_burst=%u tmc_sync=%u\r\n",
         (unsigned long)state.heartbeatCount,
         (unsigned long)now_ms,
         (unsigned long)state.homingState,
@@ -1256,11 +1623,22 @@ static void emit_heartbeat_line(
         (unsigned long)state.holdEnabled,
         (long)state.currentPosition,
         (long)state.targetPosition,
-        (unsigned long)state.faultLatch);
+        (unsigned long)state.faultLatch,
+        (unsigned long)g_panel_inputs.clickPressed,
+        (unsigned long)g_panel_inputs.encoderAActive,
+        (unsigned long)g_panel_inputs.encoderBActive,
+        (unsigned long)g_runtime_monitor.lastLoopDeltaUs,
+        (unsigned long)g_runtime_monitor.maxLoopDeltaUs,
+        (unsigned long)g_runtime_monitor.emittedStepsTotal,
+        (unsigned long)g_runtime_monitor.emittedStepsSinceHeartbeat,
+        (unsigned int)g_runtime_monitor.maxStepBurstSinceHeartbeat,
+        (unsigned int)g_tmc_sync_pending);
     if (len > 0)
     {
         usb_cdc_bridge_write(line, (uint16_t)len);
     }
+
+    runtime_monitor_roll_heartbeat_window();
 }
 
 static void emit_baseline_line(uint32_t raw_diag0, uint32_t raw_x_stop, uint32_t raw_diag2)
@@ -1287,7 +1665,8 @@ static void emit_simulation_line(uint8_t load_triggered)
     int len = snprintf(
         line,
         sizeof(line),
-        "sim raw=%lu thresh=%lu load=%lu mech=%lu stall=%lu\r\n",
+        "sim source=%s raw=%lu thresh=%lu load=%lu mech=%lu stall=%lu\r\n",
+        load_cell_source_name_local(load_cell_source(g_load_cell)),
         (unsigned long)g_load_cell.raw,
         (unsigned long)g_load_cell.threshold,
         (unsigned long)load_triggered,
@@ -1299,6 +1678,153 @@ static void emit_simulation_line(uint8_t load_triggered)
     }
 }
 
+static void apply_ui_intent(
+    const Mini12864UiIntent &intent,
+    const keyswitch::MotionInputs &inputs,
+    keyswitch::RuntimeConfig *runtime_config,
+    keyswitch::MotionConfig *motion_config,
+    keyswitch::MotionState *motion_state)
+{
+    if ((runtime_config == 0) || (motion_config == 0) || (motion_state == 0))
+    {
+        return;
+    }
+
+    char value_buffer[24];
+
+    switch (intent.type)
+    {
+    case Mini12864UiIntentType::None:
+        break;
+    case Mini12864UiIntentType::Home:
+        if (tmc_motion_allowed() == 0U) emit_tmc_unverified_blocked("ui home");
+        else keyswitch::resetForHome(motion_state, inputs.nowMs);
+        break;
+    case Mini12864UiIntentType::Stop:
+        keyswitch::forceStop(motion_state);
+        break;
+    case Mini12864UiIntentType::Tare:
+        load_cell_tare(&g_load_cell);
+        emit_simulation_line(load_cell_triggered(g_load_cell));
+        break;
+    case Mini12864UiIntentType::Backoff:
+        if (tmc_motion_allowed() == 0U) emit_tmc_unverified_blocked("ui backoff");
+        else keyswitch::startBackoff(motion_state, inputs.nowMs, *motion_config);
+        break;
+    case Mini12864UiIntentType::SetHold:
+        if ((intent.value != 0) && (tmc_motion_allowed() == 0U)) emit_tmc_unverified_blocked("ui hold");
+        else keyswitch::setHoldEnabled(motion_state, (uint8_t)(intent.value != 0 ? 1U : 0U));
+        break;
+    case Mini12864UiIntentType::MoveRelativeUm:
+        if (tmc_motion_allowed() == 0U) emit_tmc_unverified_blocked("ui jog");
+        else
+        {
+            int32_t delta_steps = axis_steps_from_signed_um(g_persisted_config, intent.value);
+            keyswitch::queueRelativeMove(motion_state, delta_steps, *motion_config);
+        }
+        break;
+    case Mini12864UiIntentType::SetDefaultPressUm:
+        snprintf(value_buffer, sizeof(value_buffer), "%ld", (long)intent.value);
+        apply_config_key_value(&g_persisted_config, "AXIS.DEFAULT_PRESS_UM", value_buffer, 1U, runtime_config, motion_config, motion_state);
+        g_config_state.dirty = 1U;
+        break;
+    case Mini12864UiIntentType::StartCycle:
+        if (tmc_motion_allowed() == 0U) emit_tmc_unverified_blocked("ui cycle");
+        else keyswitch::startCycleRoutine(motion_state, (uint32_t)((intent.value <= 0) ? 1 : intent.value), *motion_config);
+        break;
+    case Mini12864UiIntentType::SetLoadThreshold:
+        snprintf(value_buffer, sizeof(value_buffer), "%ld", (long)intent.value);
+        apply_config_key_value(&g_persisted_config, "SIM.LOAD_THRESHOLD", value_buffer, 1U, runtime_config, motion_config, motion_state);
+        g_config_state.dirty = 1U;
+        break;
+    case Mini12864UiIntentType::SetIrun:
+        snprintf(value_buffer, sizeof(value_buffer), "%ld", (long)intent.value);
+        apply_config_key_value(&g_persisted_config, "TMC.IRUN", value_buffer, 1U, runtime_config, motion_config, motion_state);
+        g_config_state.dirty = 1U;
+        break;
+    case Mini12864UiIntentType::SetIhold:
+        snprintf(value_buffer, sizeof(value_buffer), "%ld", (long)intent.value);
+        apply_config_key_value(&g_persisted_config, "TMC.IHOLD", value_buffer, 1U, runtime_config, motion_config, motion_state);
+        g_config_state.dirty = 1U;
+        break;
+    case Mini12864UiIntentType::SetIholdDelay:
+        snprintf(value_buffer, sizeof(value_buffer), "%ld", (long)intent.value);
+        apply_config_key_value(&g_persisted_config, "TMC.IHOLDDELAY", value_buffer, 1U, runtime_config, motion_config, motion_state);
+        g_config_state.dirty = 1U;
+        break;
+    case Mini12864UiIntentType::SetSgthrs:
+        snprintf(value_buffer, sizeof(value_buffer), "%ld", (long)intent.value);
+        apply_config_key_value(&g_persisted_config, "TMC.SGTHRS", value_buffer, 1U, runtime_config, motion_config, motion_state);
+        g_config_state.dirty = 1U;
+        break;
+    case Mini12864UiIntentType::SetAllowUnverifiedMotion:
+        snprintf(value_buffer, sizeof(value_buffer), "%ld", (long)(intent.value != 0 ? 1 : 0));
+        apply_config_key_value(&g_persisted_config, "TMC.ALLOW_UNVERIFIED_MOTION", value_buffer, 1U, runtime_config, motion_config, motion_state);
+        if (tmc_motion_allowed() == 0U)
+        {
+            keyswitch::setHoldEnabled(motion_state, 0U);
+        }
+        g_config_state.dirty = 1U;
+        break;
+    case Mini12864UiIntentType::SetMoveFeedrate:
+        snprintf(value_buffer, sizeof(value_buffer), "%ld", (long)intent.value);
+        apply_config_key_value(&g_persisted_config, "MOTION.MOVE_FEEDRATE_MM_PER_MIN", value_buffer, 1U, runtime_config, motion_config, motion_state);
+        g_config_state.dirty = 1U;
+        break;
+    case Mini12864UiIntentType::SetHomeFeedrate:
+        snprintf(value_buffer, sizeof(value_buffer), "%ld", (long)intent.value);
+        apply_config_key_value(&g_persisted_config, "MOTION.HOME_FEEDRATE_MM_PER_MIN", value_buffer, 1U, runtime_config, motion_config, motion_state);
+        g_config_state.dirty = 1U;
+        break;
+    case Mini12864UiIntentType::SetBackoffSteps:
+        snprintf(value_buffer, sizeof(value_buffer), "%ld", (long)intent.value);
+        apply_config_key_value(&g_persisted_config, "MOTION.BACKOFF_STEPS", value_buffer, 1U, runtime_config, motion_config, motion_state);
+        g_config_state.dirty = 1U;
+        break;
+    case Mini12864UiIntentType::SetDebounceCount:
+        snprintf(value_buffer, sizeof(value_buffer), "%ld", (long)intent.value);
+        apply_config_key_value(&g_persisted_config, "MOTION.STOP_DEBOUNCE_COUNT", value_buffer, 1U, runtime_config, motion_config, motion_state);
+        g_config_state.dirty = 1U;
+        break;
+    case Mini12864UiIntentType::SetPanelColorRed:
+        snprintf(value_buffer, sizeof(value_buffer), "%ld", (long)intent.value);
+        apply_config_key_value(&g_persisted_config, "PANEL.COLOR_RED", value_buffer, 1U, runtime_config, motion_config, motion_state);
+        g_config_state.dirty = 1U;
+        break;
+    case Mini12864UiIntentType::SetPanelColorGreen:
+        snprintf(value_buffer, sizeof(value_buffer), "%ld", (long)intent.value);
+        apply_config_key_value(&g_persisted_config, "PANEL.COLOR_GREEN", value_buffer, 1U, runtime_config, motion_config, motion_state);
+        g_config_state.dirty = 1U;
+        break;
+    case Mini12864UiIntentType::SetPanelColorBlue:
+        snprintf(value_buffer, sizeof(value_buffer), "%ld", (long)intent.value);
+        apply_config_key_value(&g_persisted_config, "PANEL.COLOR_BLUE", value_buffer, 1U, runtime_config, motion_config, motion_state);
+        g_config_state.dirty = 1U;
+        break;
+    case Mini12864UiIntentType::SaveConfig:
+        if (save_persisted_config(g_persisted_config) != 0U)
+        {
+            g_config_state.dirty = 0U;
+            g_config_state.loadedFromFlash = 1U;
+        }
+        break;
+    case Mini12864UiIntentType::ResetConfig:
+        g_persisted_config = make_default_persisted_config();
+        *motion_config = make_motion_config(g_persisted_config);
+        runtime_config->stopSignalActiveHigh = active_motion_channel(g_persisted_config).stopSignalActiveHigh;
+        runtime_config->invertXDir = active_motion_channel(g_persisted_config).dirInverted;
+        runtime_config->homeTowardsPositive = active_motion_channel(g_persisted_config).homeTowardsPositive;
+        apply_default_press_target(motion_state, g_persisted_config, *motion_config);
+        g_config_state.dirty = 1U;
+        g_config_state.requiresReboot = 1U;
+        break;
+    case Mini12864UiIntentType::Reboot:
+        bootloader_request_application_boot();
+        NVIC_SystemReset();
+        break;
+    }
+}
+
 static uint8_t read_load_cell_triggered(void)
 {
     return load_cell_triggered(g_load_cell);
@@ -1307,6 +1833,69 @@ static uint8_t read_load_cell_triggered(void)
 static uint32_t read_load_cell_raw(void)
 {
     return load_cell_raw(g_load_cell);
+}
+
+static uint8_t load_cell_hx711_pins_valid(const LoadCellConfig &config)
+{
+    return ((pin_assignment_valid(config.pins.data) != 0U) && (pin_assignment_valid(config.pins.clock) != 0U)) ? 1U : 0U;
+}
+
+static void configure_load_cell_io(const LoadCellConfig &config)
+{
+    if ((uint8_t)config.source != (uint8_t)LoadCellSourceKind::Hx711)
+    {
+        return;
+    }
+
+    if (load_cell_hx711_pins_valid(config) == 0U)
+    {
+        return;
+    }
+
+    enable_gpio_clock(config.pins.data.portId);
+    enable_gpio_clock(config.pins.clock.portId);
+    __DSB();
+
+    pin_set_input_pull(config.pins.data, 1U);
+    pin_set_output(config.pins.clock);
+    pin_write_low(config.pins.clock);
+}
+
+static void refresh_load_cell_input(void)
+{
+    const LoadCellConfig &config = g_persisted_config.loadCell;
+    if ((uint8_t)config.source != (uint8_t)LoadCellSourceKind::Hx711)
+    {
+        return;
+    }
+
+    if (load_cell_hx711_pins_valid(config) == 0U)
+    {
+        return;
+    }
+
+    if (pin_read(config.pins.data) != 0U)
+    {
+        return;
+    }
+
+    uint32_t sample = 0U;
+    const uint32_t pulse_cycles = cycles_from_us(1U);
+    for (uint32_t index = 0U; index < 24U; ++index)
+    {
+        pin_write_high(config.pins.clock);
+        delay_cycles(pulse_cycles);
+        sample = (sample << 1U) | (pin_read(config.pins.data) & 0x1U);
+        pin_write_low(config.pins.clock);
+        delay_cycles(pulse_cycles);
+    }
+
+    pin_write_high(config.pins.clock);
+    delay_cycles(pulse_cycles);
+    pin_write_low(config.pins.clock);
+    delay_cycles(pulse_cycles);
+
+    load_cell_set_hx711_sample(&g_load_cell, load_cell_hx711_decode_u24(sample));
 }
 
 static uint8_t read_stallguard_triggered(void)
@@ -1336,7 +1925,7 @@ int main()
         system_clock_config_hsi_safe();
     }
 
-    enable_cycle_counter();
+    step_scheduler_timer_init();
 
     enable_gpio_clock((uint8_t)GpioPortId::A);
     __DSB();
@@ -1346,14 +1935,17 @@ int main()
 
     g_config_state = select_boot_config(&g_persisted_config, apply_boot_config_key_value);
 
-    load_cell_set_threshold(&g_load_cell, g_persisted_config.loadCell.threshold);
+    load_cell_apply_config(&g_load_cell, g_persisted_config.loadCell);
     tmc_driver_runtime().tmc2209 = current_motion_channel_const().tmc2209;
 
     enable_gpio_clocks_for_config(g_persisted_config);
 
     pin_set_output(g_persisted_config.pins.psOn);
     pin_set_output(g_persisted_config.pins.safePower);
-    pin_set_output(g_persisted_config.pins.led);
+    if (led_pin_conflicts_with_load_cell(g_persisted_config) == 0U)
+    {
+        pin_set_output(g_persisted_config.pins.led);
+    }
     pin_set_output(current_motion_channel_const().pins.uart);
     pin_set_output(current_motion_channel_const().pins.dir);
     pin_set_output(current_motion_channel_const().pins.step);
@@ -1362,6 +1954,9 @@ int main()
     pin_set_input_pull(g_persisted_config.pins.diag0, 1U);
     pin_set_input_pull(g_persisted_config.pins.diag2, 1U);
     pin_set_input_pull(current_motion_channel_const().pins.stop, (uint8_t)(current_motion_channel_const().stopSignalActiveHigh ? 0U : 1U));
+    configure_load_cell_io(g_persisted_config.loadCell);
+    mini12864_panel_init_inputs(g_panel_pins);
+    mini12864_display_init(g_panel_pins);
 
     // Enable board power domains required for stepper drivers.
     pin_write_high(g_persisted_config.pins.psOn);
@@ -1378,17 +1973,23 @@ int main()
     emit_boot_source_line(g_config_state.source);
 
     // Single confirmation pulse after USB init returns.
-    pin_write_high(g_persisted_config.pins.led);
-    delay_cycles(2000000U);
-    pin_write_low(g_persisted_config.pins.led);
-    delay_cycles(2000000U);
+    if (led_pin_conflicts_with_load_cell(g_persisted_config) == 0U)
+    {
+        pin_write_high(g_persisted_config.pins.led);
+        delay_cycles(2000000U);
+        pin_write_low(g_persisted_config.pins.led);
+        delay_cycles(2000000U);
+    }
     usb_write_str("SKR2 X endstop homing test start\r\n");
 
     const uint32_t x_stop_baseline_diag0 = sample_pin_baseline(g_persisted_config.pins.diag0);
     const uint32_t x_stop_baseline_xstop = sample_pin_baseline(current_motion_channel_const().pins.stop);
     const uint32_t x_stop_baseline_diag2 = sample_pin_baseline(g_persisted_config.pins.diag2);
     emit_baseline_line(x_stop_baseline_diag0, x_stop_baseline_xstop, x_stop_baseline_diag2);
-    pin_write_low(g_persisted_config.pins.led);
+    if (led_pin_conflicts_with_load_cell(g_persisted_config) == 0U)
+    {
+        pin_write_low(g_persisted_config.pins.led);
+    }
 
     usb_write_str("homing: seeking towards switch\r\n");
 
@@ -1413,14 +2014,18 @@ int main()
 
     while (1)
     {
-        usb_cdc_bridge_poll();
         const uint32_t now_ms = HAL_GetTick();
-        const uint32_t now_cycles = cycle_counter_now();
+        const uint32_t now_cycles = 0U;
+        const uint32_t now_us = step_scheduler_timer_now_us();
+        runtime_monitor_record_loop(now_us);
         step_scheduler_service(now_cycles);
+        refresh_load_cell_input();
+        g_panel_inputs = mini12864_panel_read_inputs(g_panel_pins);
 
         const uint8_t raw_x_stop = (uint8_t)pin_read(current_motion_channel_const().pins.stop);
         const uint8_t load_triggered = read_load_cell_triggered();
         const uint8_t step_issued = step_scheduler_take_issued_step();
+    runtime_monitor_record_steps(step_issued);
 
         const keyswitch::MotionInputs inputs = {
             (uint8_t)pin_read(g_persisted_config.pins.diag0),
@@ -1433,6 +2038,30 @@ int main()
             read_load_cell_raw(),
             now_ms,
         };
+
+        keyswitch::MotionOutputs outputs = keyswitch::tickMotion(
+            &motion_state,
+            inputs,
+            motion_config,
+            runtime_config);
+
+        g_step_scheduler.stepIntervalUs = active_step_interval_us_for_state(g_persisted_config, motion_state);
+
+        if (tmc_motion_allowed() == 0U)
+        {
+            outputs.driverEnable = 0U;
+            outputs.issueStep = 0U;
+            outputs.holdEnabled = 0U;
+        }
+
+        // Motion timing gets first claim on each loop iteration; UI, USB, and display
+        // work run afterward so they cannot delay due step issuance.
+        apply_motion_outputs(outputs, now_cycles);
+
+        usb_cdc_bridge_poll();
+
+        const Mini12864UiIntent ui_intent = mini12864_ui_update(g_panel_inputs, g_persisted_config, g_config_state, motion_state);
+        apply_ui_intent(ui_intent, inputs, &runtime_config, &motion_config, &motion_state);
 
         if (CDC_ReadCommand_FS(command_buf, sizeof(command_buf)) > 0U)
         {
@@ -1553,7 +2182,7 @@ int main()
             {
                 usb_write_str("cmd: bootloader\r\n");
                 usb_cdc_bridge_poll();
-                bootloader_clear_application_boot_request();
+                bootloader_request_stay_in_bootloader();
                 NVIC_SystemReset();
             }
             else if (command.type == keyswitch::CommandType::Boot)
@@ -1562,11 +2191,8 @@ int main()
             }
             else if (command.type == keyswitch::CommandType::Driver)
             {
-                x_tmc2209_refresh_verification(g_persisted_config);
-                if (tmc_motion_allowed() == 0U)
-                {
-                    keyswitch::setHoldEnabled(&motion_state, 0U);
-                }
+                request_tmc_sync(TmcSyncVerify);
+                service_tmc_sync(&motion_state);
                 usb_write_str("cmd: driver\r\n");
                 emit_driver_line();
             }
@@ -1613,11 +2239,8 @@ int main()
                 tmc_driver_runtime().tmc2209.irun = keyswitch::clampTmcCurrentScale(command.value);
                 active_motion_channel(g_persisted_config).tmc2209.irun = tmc_driver_runtime().tmc2209.irun;
                 g_config_state.dirty = 1U;
-                x_tmc2209_apply_config(g_persisted_config);
-                if (tmc_motion_allowed() == 0U)
-                {
-                    keyswitch::setHoldEnabled(&motion_state, 0U);
-                }
+                request_tmc_sync(TmcSyncApply);
+                service_tmc_sync(&motion_state);
                 int len = snprintf(line, sizeof(line), "cmd: irun value=%lu\r\n", (unsigned long)tmc_driver_runtime().tmc2209.irun);
                 if (len > 0)
                 {
@@ -1631,11 +2254,8 @@ int main()
                 tmc_driver_runtime().tmc2209.ihold = keyswitch::clampTmcCurrentScale(command.value);
                 active_motion_channel(g_persisted_config).tmc2209.ihold = tmc_driver_runtime().tmc2209.ihold;
                 g_config_state.dirty = 1U;
-                x_tmc2209_apply_config(g_persisted_config);
-                if (tmc_motion_allowed() == 0U)
-                {
-                    keyswitch::setHoldEnabled(&motion_state, 0U);
-                }
+                request_tmc_sync(TmcSyncApply);
+                service_tmc_sync(&motion_state);
                 int len = snprintf(line, sizeof(line), "cmd: ihold value=%lu\r\n", (unsigned long)tmc_driver_runtime().tmc2209.ihold);
                 if (len > 0)
                 {
@@ -1649,11 +2269,8 @@ int main()
                 tmc_driver_runtime().tmc2209.iholddelay = (uint8_t)((command.value < 0) ? 0 : ((command.value > 15) ? 15 : command.value));
                 active_motion_channel(g_persisted_config).tmc2209.iholddelay = tmc_driver_runtime().tmc2209.iholddelay;
                 g_config_state.dirty = 1U;
-                x_tmc2209_apply_config(g_persisted_config);
-                if (tmc_motion_allowed() == 0U)
-                {
-                    keyswitch::setHoldEnabled(&motion_state, 0U);
-                }
+                request_tmc_sync(TmcSyncApply);
+                service_tmc_sync(&motion_state);
                 int len = snprintf(line, sizeof(line), "cmd: iholddelay value=%lu\r\n", (unsigned long)tmc_driver_runtime().tmc2209.iholddelay);
                 if (len > 0)
                 {
@@ -1667,11 +2284,8 @@ int main()
                 tmc_driver_runtime().tmc2209.sgthrs = (uint8_t)((command.value < 0) ? 0 : ((command.value > 255) ? 255 : command.value));
                 active_motion_channel(g_persisted_config).tmc2209.sgthrs = tmc_driver_runtime().tmc2209.sgthrs;
                 g_config_state.dirty = 1U;
-                x_tmc2209_apply_config(g_persisted_config);
-                if (tmc_motion_allowed() == 0U)
-                {
-                    keyswitch::setHoldEnabled(&motion_state, 0U);
-                }
+                request_tmc_sync(TmcSyncApply);
+                service_tmc_sync(&motion_state);
                 int len = snprintf(line, sizeof(line), "cmd: sgthrs value=%lu\r\n", (unsigned long)tmc_driver_runtime().tmc2209.sgthrs);
                 if (len > 0)
                 {
@@ -1804,6 +2418,17 @@ int main()
                 usb_write_str("cmd: simclear\r\n");
                 emit_simulation_line(read_load_cell_triggered());
             }
+            else if (command.type == keyswitch::CommandType::Tare)
+            {
+                load_cell_tare(&g_load_cell);
+                usb_write_str("cmd: tare\r\n");
+                emit_simulation_line(read_load_cell_triggered());
+            }
+            else if (command.type == keyswitch::CommandType::PanelPins)
+            {
+                usb_write_str("cmd: panelpins\r\n");
+                emit_panel_pins_line();
+            }
             else if (command.type == keyswitch::CommandType::Home)
             {
                 if (tmc_motion_allowed() == 0U)
@@ -1843,58 +2468,14 @@ int main()
             }
         }
 
-        keyswitch::MotionOutputs outputs = keyswitch::tickMotion(
-            &motion_state,
-            inputs,
-            motion_config,
-            runtime_config);
-
-        g_step_scheduler.stepIntervalCycles = cycles_from_us(active_step_interval_us_for_state(g_persisted_config, motion_state));
-
-        if (tmc_motion_allowed() == 0U)
-        {
-            outputs.driverEnable = 0U;
-            outputs.issueStep = 0U;
-            outputs.holdEnabled = 0U;
-        }
-
-        if (outputs.dirHigh != 0U)
-        {
-            pin_write_high(current_motion_channel_const().pins.dir);
-        }
-        else
-        {
-            pin_write_low(current_motion_channel_const().pins.dir);
-        }
-
-        if (outputs.driverEnable != 0U)
-        {
-            x_driver_enable(g_persisted_config);
-        }
-        else
-        {
-            x_driver_disable(g_persisted_config);
-            step_scheduler_reset();
-        }
-
-        if (outputs.issueStep != 0U)
-        {
-            step_scheduler_request_step(now_cycles);
-        }
-
-        if (outputs.ledOn != 0U)
-        {
-            pin_write_high(g_persisted_config.pins.led);
-        }
-        else
-        {
-            pin_write_low(g_persisted_config.pins.led);
-        }
+        mini12864_display_render(g_panel_pins, now_ms, inputs, motion_state, outputs, g_panel_inputs, g_persisted_config, g_config_state);
 
         if (outputs.eventMessage != 0)
         {
             usb_write_str(outputs.eventMessage);
         }
+
+        service_tmc_sync(&motion_state);
 
         if (outputs.emitStatus != 0U)
         {

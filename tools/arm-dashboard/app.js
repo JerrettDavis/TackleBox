@@ -36,7 +36,14 @@ const dom = {
   stopMacroButton: document.getElementById('stopMacroButton'),
   loadRoutinePresetButton: document.getElementById('loadRoutinePresetButton'),
   clearChartButton: document.getElementById('clearChartButton'),
+  clearLoadCellChartButton: document.getElementById('clearLoadCellChartButton'),
+  loadSimulatedCurveButton: document.getElementById('loadSimulatedCurveButton'),
+  clearResponseCurveButton: document.getElementById('clearResponseCurveButton'),
   telemetryChart: document.getElementById('telemetryChart'),
+  loadCellChart: document.getElementById('loadCellChart'),
+  responseCurveChart: document.getElementById('responseCurveChart'),
+  loadCellSummary: document.getElementById('loadCellSummary'),
+  responseCurveSummary: document.getElementById('responseCurveSummary'),
   positionValue: document.getElementById('positionValue'),
   targetValue: document.getElementById('targetValue'),
   homedValue: document.getElementById('homedValue'),
@@ -48,7 +55,12 @@ const dom = {
   cycleRemainingValue: document.getElementById('cycleRemainingValue'),
   cycleDoneValue: document.getElementById('cycleDoneValue'),
   driverCurrentValue: document.getElementById('driverCurrentValue'),
-  driverThresholdValue: document.getElementById('driverThresholdValue')
+  driverThresholdValue: document.getElementById('driverThresholdValue'),
+  loadCellSourceValue: document.getElementById('loadCellSourceValue'),
+  loadCellRawValue: document.getElementById('loadCellRawValue'),
+  loadCellThresholdValue: document.getElementById('loadCellThresholdValue'),
+  loadCellPeakValue: document.getElementById('loadCellPeakValue'),
+  loadCellTriggerValue: document.getElementById('loadCellTriggerValue')
 };
 
 const state = {
@@ -75,7 +87,19 @@ const state = {
     done: 0,
     driver: { uart: null, irun: null, ihold: null, iholddelay: null, tpowerdown: null, sgthrs: null }
   },
-  chartSamples: []
+  chartSamples: [],
+  loadCell: {
+    source: '--',
+    raw: 0,
+    threshold: 0,
+    triggered: 0,
+    peak: 0
+  },
+  loadCellSamples: [],
+  simulatedCurve: {
+    meta: null,
+    samples: []
+  }
 };
 
 const STOP_SOURCE_LABELS = {
@@ -118,6 +142,31 @@ function parseKeyValueLine(line) {
   );
 }
 
+function parseSimTelemetryLine(line) {
+  const result = {};
+
+  line
+    .replace(/^sim\s+/, '')
+    .trim()
+    .split(/\s+/)
+    .forEach((pair) => {
+      const [key, rawValue] = pair.split('=');
+      if (!key || rawValue === undefined) {
+        return;
+      }
+
+      if (key === 'source') {
+        result.source = rawValue;
+        return;
+      }
+
+      const numericValue = Number(rawValue);
+      result[key] = Number.isFinite(numericValue) ? numericValue : rawValue;
+    });
+
+  return result;
+}
+
 function updateTelemetryCardValues() {
   const driver = state.telemetry.driver;
   const displayDriverValue = (value) => (Number.isFinite(value) ? String(value) : '--');
@@ -149,6 +198,16 @@ function updateTelemetryCardValues() {
   }
 }
 
+function updateLoadCellValues() {
+  dom.loadCellSourceValue.textContent = state.loadCell.source;
+  dom.loadCellRawValue.textContent = String(state.loadCell.raw);
+  dom.loadCellThresholdValue.textContent = String(state.loadCell.threshold);
+  dom.loadCellPeakValue.textContent = String(state.loadCell.peak);
+  dom.loadCellTriggerValue.textContent = state.loadCell.triggered ? 'Triggered' : 'Clear';
+  dom.loadCellTriggerValue.classList.toggle('is-triggered', Boolean(state.loadCell.triggered));
+  dom.loadCellSummary.textContent = `Live ${state.loadCell.source} samples. Raw ${state.loadCell.raw}, threshold ${state.loadCell.threshold}, peak ${state.loadCell.peak}, trigger ${state.loadCell.triggered ? 'active' : 'clear'}.`;
+}
+
 function pushChartSample(force, position) {
   state.chartSamples.push({
     at: Date.now(),
@@ -161,6 +220,34 @@ function pushChartSample(force, position) {
   }
 
   renderChart();
+}
+
+function pushLoadCellSample(raw, threshold, triggered) {
+  state.loadCellSamples.push({
+    at: Date.now(),
+    raw,
+    threshold,
+    triggered
+  });
+
+  while (state.loadCellSamples.length > 360) {
+    state.loadCellSamples.shift();
+  }
+
+  state.loadCell.raw = raw;
+  state.loadCell.threshold = threshold;
+  state.loadCell.triggered = triggered;
+  state.loadCell.peak = Math.max(state.loadCell.peak, raw);
+  updateLoadCellValues();
+  renderLoadCellChart();
+}
+
+function formatCurveSummary(meta) {
+  if (!meta) {
+    return 'Run test\\run_simulated_probe_workflow.ps1, then load the exported curve here to preview the simulated switch/load-cell response before hardware hookup.';
+  }
+
+  return `Threshold ${meta.threshold}, press target ${meta.pressTarget}, contact ${meta.contactPosition}, cycles ${meta.cycleCount}, hits ${meta.loadCellHits}, max force ${meta.maxForce}.`;
 }
 
 function renderChart() {
@@ -236,8 +323,215 @@ function renderChart() {
   ctx.fillText(`Position ${posMin}..${posMax}`, 180, height - 12);
 }
 
+function renderLoadCellChart() {
+  const canvas = dom.loadCellChart;
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width;
+  const height = canvas.height;
+  const left = 52;
+  const top = 18;
+  const chartWidth = width - 76;
+  const chartHeight = height - 52;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#fefaf4';
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.strokeStyle = 'rgba(60, 40, 24, 0.12)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i += 1) {
+    const y = top + (chartHeight / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(left + chartWidth, y);
+    ctx.stroke();
+  }
+
+  const samples = state.loadCellSamples;
+  if (samples.length < 2) {
+    ctx.fillStyle = '#6a5a4d';
+    ctx.font = '16px Bahnschrift';
+    ctx.fillText('Waiting for live load-cell samples…', 24, 42);
+    return;
+  }
+
+  const rawValues = samples.map((sample) => sample.raw);
+  const thresholdValues = samples.map((sample) => sample.threshold);
+  const yMin = Math.min(...rawValues, ...thresholdValues, 0);
+  const yMax = Math.max(...rawValues, ...thresholdValues, 1);
+  const xAt = (index) => left + (chartWidth * index) / Math.max(samples.length - 1, 1);
+  const yAt = (value) => top + chartHeight - ((value - yMin) / Math.max(yMax - yMin, 1)) * chartHeight;
+
+  const latestThreshold = samples[samples.length - 1]?.threshold ?? 0;
+  const thresholdY = yAt(latestThreshold);
+  ctx.setLineDash([6, 4]);
+  ctx.strokeStyle = 'rgba(179, 76, 49, 0.9)';
+  ctx.beginPath();
+  ctx.moveTo(left, thresholdY);
+  ctx.lineTo(left + chartWidth, thresholdY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = 'rgba(28, 139, 125, 0.12)';
+  let activeStartIndex = null;
+  samples.forEach((sample, index) => {
+    if (sample.triggered && activeStartIndex === null) {
+      activeStartIndex = index;
+    }
+
+    const isLast = index === samples.length - 1;
+    if ((!sample.triggered || isLast) && activeStartIndex !== null) {
+      const endIndex = sample.triggered && isLast ? index : Math.max(index - 1, activeStartIndex);
+      const startX = xAt(activeStartIndex);
+      const endX = xAt(endIndex);
+      ctx.fillRect(startX, top, Math.max(endX - startX, 3), chartHeight);
+      activeStartIndex = null;
+    }
+  });
+
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = '#1c8b7d';
+  ctx.beginPath();
+  samples.forEach((sample, index) => {
+    const x = xAt(index);
+    const y = yAt(sample.raw);
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  });
+  ctx.stroke();
+
+  ctx.fillStyle = '#1c8b7d';
+  samples.filter((sample) => sample.triggered).forEach((sample, index) => {
+    const sampleIndex = samples.indexOf(sample);
+    ctx.beginPath();
+    ctx.arc(xAt(sampleIndex), yAt(sample.raw), 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  ctx.fillStyle = '#6a5a4d';
+  ctx.font = '13px Bahnschrift';
+  ctx.fillText(`Raw ${yMin}..${yMax}`, left, height - 12);
+  ctx.fillStyle = '#b34c31';
+  ctx.fillText(`Threshold ${latestThreshold}`, 220, height - 12);
+  ctx.fillStyle = '#1c8b7d';
+  ctx.fillText(`Peak ${state.loadCell.peak}`, 390, height - 12);
+}
+
+function renderResponseCurve() {
+  const canvas = dom.responseCurveChart;
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width;
+  const height = canvas.height;
+  ctx.clearRect(0, 0, width, height);
+
+  ctx.fillStyle = '#fefaf4';
+  ctx.fillRect(0, 0, width, height);
+
+  const left = 52;
+  const top = 18;
+  const chartWidth = width - 76;
+  const chartHeight = height - 52;
+
+  ctx.strokeStyle = 'rgba(60, 40, 24, 0.12)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i += 1) {
+    const y = top + (chartHeight / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(left + chartWidth, y);
+    ctx.stroke();
+  }
+
+  const samples = state.simulatedCurve.samples;
+  const meta = state.simulatedCurve.meta;
+  dom.responseCurveSummary.textContent = formatCurveSummary(meta);
+
+  if (!samples.length) {
+    ctx.fillStyle = '#6a5a4d';
+    ctx.font = '16px Bahnschrift';
+    ctx.fillText('No simulated curve loaded yet.', 24, 42);
+    return;
+  }
+
+  const positions = samples.map((sample) => sample.position);
+  const forces = samples.map((sample) => sample.force);
+  const xMin = Math.min(...positions, 0);
+  const xMax = Math.max(...positions, 1);
+  const yMin = 0;
+  const yMax = Math.max(...forces, meta?.threshold ?? 0, 1);
+  const xAt = (value) => left + ((value - xMin) / Math.max(xMax - xMin, 1)) * chartWidth;
+  const yAt = (value) => top + chartHeight - ((value - yMin) / Math.max(yMax - yMin, 1)) * chartHeight;
+
+  if (meta && Number.isFinite(meta.threshold)) {
+    const thresholdY = yAt(meta.threshold);
+    ctx.setLineDash([6, 5]);
+    ctx.strokeStyle = 'rgba(179, 76, 49, 0.9)';
+    ctx.beginPath();
+    ctx.moveTo(left, thresholdY);
+    ctx.lineTo(left + chartWidth, thresholdY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#b34c31';
+    ctx.font = '13px Bahnschrift';
+    ctx.fillText(`Threshold ${meta.threshold}`, left + 8, Math.max(thresholdY - 8, 18));
+  }
+
+  if (meta && Number.isFinite(meta.contactPosition)) {
+    const contactX = xAt(meta.contactPosition);
+    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = 'rgba(28, 139, 125, 0.6)';
+    ctx.beginPath();
+    ctx.moveTo(contactX, top);
+    ctx.lineTo(contactX, top + chartHeight);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = '#1c8b7d';
+  ctx.beginPath();
+  samples.forEach((sample, index) => {
+    const x = xAt(sample.position);
+    const y = yAt(sample.force);
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  });
+  ctx.stroke();
+
+  ctx.fillStyle = '#b34c31';
+  samples.filter((sample) => sample.load).forEach((sample) => {
+    ctx.beginPath();
+    ctx.arc(xAt(sample.position), yAt(sample.force), 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  ctx.fillStyle = '#6a5a4d';
+  ctx.font = '13px Bahnschrift';
+  ctx.fillText(`Position ${xMin}..${xMax}`, left, height - 12);
+  ctx.fillText(`Force ${yMin}..${yMax}`, 220, height - 12);
+}
+
+async function loadSimulatedCurve() {
+  const response = await fetch(`./simulated-probe-curve.json?ts=${Date.now()}`);
+  if (!response.ok) {
+    throw new Error(`Simulated curve file was not found (${response.status}). Run test\\run_simulated_probe_workflow.ps1 first.`);
+  }
+
+  const payload = await response.json();
+  state.simulatedCurve.meta = payload.meta ?? null;
+  state.simulatedCurve.samples = Array.isArray(payload.samples) ? payload.samples : [];
+  renderResponseCurve();
+  logLine('sys', `Loaded simulated curve with ${state.simulatedCurve.samples.length} samples.`);
+}
+
 function handleTelemetryLine(line) {
-  if (line.startsWith('pc0=')) {
+  if (line.startsWith('diag0=')) {
     const parsed = parseKeyValueLine(line);
     Object.assign(state.telemetry, {
       force: parsed.force ?? state.telemetry.force,
@@ -281,13 +575,13 @@ function handleTelemetryLine(line) {
   }
 
   if (line.startsWith('sim ')) {
-    const parsed = parseKeyValueLine(line.replace('sim ', ''));
-    state.telemetry.force = parsed.raw ?? state.telemetry.force;
+    const parsed = parseSimTelemetryLine(line);
+    state.loadCell.source = parsed.source ?? state.loadCell.source;
     state.telemetry.load = parsed.load ?? state.telemetry.load;
     state.telemetry.mech = parsed.mech ?? state.telemetry.mech;
     state.telemetry.stall = parsed.stall ?? state.telemetry.stall;
     updateTelemetryCardValues();
-    pushChartSample(state.telemetry.force, state.telemetry.pos);
+    pushLoadCellSample(parsed.raw ?? state.loadCell.raw, parsed.thresh ?? state.loadCell.threshold, parsed.load ?? state.loadCell.triggered);
     return true;
   }
 
@@ -397,7 +691,7 @@ function startPolling() {
       return;
     }
     try {
-      await sendCommand('status');
+      await sendCommand('safety');
       await sendCommand('driver');
     } catch (error) {
       logLine('err', error.message || String(error));
@@ -495,6 +789,22 @@ function bindUi() {
     renderChart();
   });
 
+  dom.clearLoadCellChartButton.addEventListener('click', () => {
+    state.loadCellSamples = [];
+    state.loadCell.peak = state.loadCell.raw;
+    updateLoadCellValues();
+    renderLoadCellChart();
+  });
+
+  dom.loadSimulatedCurveButton.addEventListener('click', () => {
+    loadSimulatedCurve().catch((error) => logLine('err', error.message || String(error)));
+  });
+
+  dom.clearResponseCurveButton.addEventListener('click', () => {
+    state.simulatedCurve = { meta: null, samples: [] };
+    renderResponseCurve();
+  });
+
   dom.autoPollToggle.addEventListener('change', startPolling);
   dom.pollRateInput.addEventListener('change', startPolling);
 
@@ -562,5 +872,8 @@ function bindUi() {
 bindUi();
 updateConnectionUi();
 updateTelemetryCardValues();
+updateLoadCellValues();
 renderChart();
+renderLoadCellChart();
+renderResponseCurve();
 logLine('sys', 'Dashboard ready. Serve this folder over localhost and connect with Chrome or Edge.');

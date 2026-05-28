@@ -4,6 +4,7 @@
 
 namespace {
 constexpr uint32_t kBootAppRequestMagic = 0xB00720A5U;
+constexpr uint32_t kStayInBootloaderMagic = 0xB00710ADU;
 
 static void enable_backup_register_access(void)
 {
@@ -35,6 +36,29 @@ extern "C" uint8_t bootloader_consume_application_boot_request(void)
     enable_backup_register_access();
 
     if (RTC->BKP0R != kBootAppRequestMagic)
+    {
+        return 0U;
+    }
+
+    RTC->BKP0R = 0U;
+    __DSB();
+    __ISB();
+    return 1U;
+}
+
+extern "C" void bootloader_request_stay_in_bootloader(void)
+{
+    enable_backup_register_access();
+    RTC->BKP0R = kStayInBootloaderMagic;
+    __DSB();
+    __ISB();
+}
+
+extern "C" uint8_t bootloader_consume_stay_in_bootloader_request(void)
+{
+    enable_backup_register_access();
+
+    if (RTC->BKP0R != kStayInBootloaderMagic)
     {
         return 0U;
     }

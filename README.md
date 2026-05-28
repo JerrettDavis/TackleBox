@@ -131,6 +131,8 @@ The current Boatswain command surface accepts both plain-text and a few trimmed-
 
 The simulation commands are the current way to validate the load-cell and StallGuard code paths before the load cell is physically attached. They let you drive the safety model over USB and verify state transitions, stop-source selection, and telemetry formatting on the real board.
 
+For a fully local dry run, the repo also now includes `test/run_simulated_probe_workflow.ps1`. That compiles and runs a host-side probe workflow simulator which exercises the same command parser, motion domain, and simulated load-cell threshold path used by the board-facing flow, then exports `tools/arm-dashboard/simulated-probe-curve.json` for visualization in the local arm dashboard.
+
 Current telemetry fields:
 
 - `diag0`: raw DIAG0 input level for the currently configured `pin.diag0` role
@@ -150,6 +152,12 @@ Current telemetry fields:
 - `press`: configured press target used by the `CYCLE` routine
 - `cycles`: remaining routine cycles
 - `done`: completed routine cycles
+- `loop_last_us`: most recent main-loop interval in microseconds
+- `loop_max_us`: largest main-loop interval observed in the current heartbeat window
+- `steps_total`: total emitted step pulses since boot
+- `steps_hb`: emitted step pulses counted since the last heartbeat line
+- `steps_burst`: largest burst of acknowledged timer-driven steps consumed in one loop pass since the last heartbeat line
+- `tmc_sync`: whether deferred TMC runtime sync work is currently pending (`0 no`, `1 apply`, `2 verify`, `3 both`)
 
 Driver telemetry:
 
@@ -598,6 +606,24 @@ The firmware now maintains a tracked arm position once homed, and it can be orch
 
 The runtime motion model is still step-native internally, but the trimmed G-code surface now maps `G0/G1 X...` millimeter positions through the configured axis mechanics. The explicit bring-up commands `MOVEABS`, `MOVEREL`, `JOG`, `SETPOS`, and `PRESSPOS` remain step-native so scripts and low-level diagnostics can still work directly in step units.
 
+For attached load-cell bring-up, the repo now includes `test/run_probe_cycle.ps1`. That script configures `LOADCELL.SOURCE`, `LOADCELL.CONNECTOR`, `LOADCELL.THRESHOLD`, then runs `HOME`, `PRESSPOS`, and `CYCLE` over the live CDC shell so the full operator probe path is repeatable from one command.
+
+```powershell
+Set-Location "c:\git\BTT SKR2 Testing"
+& ".\test\run_probe_cycle.ps1" -AllowUnverifiedMotion -LoadCellConnector SKR2_DET -LoadCellSource HX711 -LoadCellThreshold 1000 -PressTargetSteps 40 -CycleCount 5
+```
+
+That script is intentionally honest about the current firmware boundary: the motion/probe command path is ready, but real HX711 or ADC threshold trips still depend on the future acquisition implementation in `src/load_cell.cpp`.
+
+For no-hardware prep, run:
+
+```powershell
+Set-Location "c:\git\BTT SKR2 Testing"
+& ".\test\run_simulated_probe_workflow.ps1"
+```
+
+Then serve `tools/arm-dashboard` and click **Load exported curve** to inspect the simulated force-versus-position response locally before the real board and load cell are hooked up.
+
 The runtime scheduler and domain model are still single-axis today, but the base firmware now carries a generalized indexed channel array with labels and transport metadata. That keeps the keyswitch tester as one application profile over a broader motion/control stack that can grow toward printer, CNC, robotics, multi-MCU, and bus-backed workloads without rewriting the software-layer channel model.
 
 The firmware targets the SKR2 X-slot TMC UART pin on `PE0`, and the command/config surface for TMC2209 current and stall-threshold tuning is in place. On the current reference bench, live verification still reports `driver verify=0` / `ifcnt_valid=0`, so driver-backed motion remains a constrained bring-up path and still depends on `TMC.ALLOW_UNVERIFIED_MOTION=1` for physical travel testing.
@@ -626,6 +652,7 @@ Current bench notes:
 - The observed rotation-distance calibration was approximately `2x` high at `AXIS.TRAVEL_UM_PER_ROTATION=8000`; the current temporary bench fit is `AXIS.TRAVEL_UM_PER_ROTATION=15900`, which put `MOVEABS -20126` within about `2 mm` of a `100 mm` reference marker on this setup.
 - The current nicest motion tradeoff on this reference bench was `MOTION.HOME_FEEDRATE_MM_PER_MIN=600` and `MOTION.MOVE_FEEDRATE_MM_PER_MIN=1500`; the axis remained smooth, stable, and nearly silent there.
 - `MOTION.MOVE_FEEDRATE_MM_PER_MIN=2400` completed repeated away-and-back passes without fault, but it was noticeably noisier and more vibration-prone, so treat that range as exploratory until the TMC chopping and quiet-step behavior are tuned properly.
+- The current runtime now uses timer-driven step emission, incremental display flushing, and deferred runtime TMC sync; use the heartbeat `loop_*`, `steps_*`, and `tmc_sync` fields to watch whether later changes reintroduce loop starvation or queued driver work.
 - Do not treat the load-cell phase as ready until the TMC UART path verifies cleanly without the unverified-motion override.
 
 ## Design Direction
@@ -640,11 +667,11 @@ The current command layer is intentionally small, but it is structured to evolve
 
 Near-term cleanup targets:
 
-1. smooth motion timing further by separating stepping cadence from telemetry cadence
-2. finish timer-driven stepping so motion is smooth under heavier telemetry load
-3. wire in the load-cell frontend and calibration flow behind the existing placeholder hooks
-4. wire in TMC2209 DIAG/UART handling behind the existing stall fallback hook
-5. split hardware pin maps and board config from firmware startup
+1. reduce or eliminate main-loop HX711 polling so sensing does not compete with runtime control work
+2. wire in the load-cell frontend calibration flow behind the existing placeholder hooks
+3. finish TMC2209 DIAG/UART verification on the real bench without the unverified-motion override
+4. split hardware pin maps and board config from firmware startup
+5. add richer host-side monitoring/dashboard views on top of the existing heartbeat telemetry
 
 Keyswitch tester targets:
 
