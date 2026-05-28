@@ -206,7 +206,7 @@ h1 {
 
 .telemetry-cards {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -236,6 +236,8 @@ h1 {
 .accent-red::after { background: #b94537; }
 .accent-purple::after { background: #6650a8; }
 .accent-slate::after { background: #34414a; }
+.accent-amber::after { background: #cb7f1f; }
+.accent-teal::after { background: #17807b; }
 
 .telemetry-label {
   display: block;

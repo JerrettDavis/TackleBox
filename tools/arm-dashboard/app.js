@@ -56,6 +56,10 @@ const dom = {
   cycleDoneValue: document.getElementById('cycleDoneValue'),
   driverCurrentValue: document.getElementById('driverCurrentValue'),
   driverThresholdValue: document.getElementById('driverThresholdValue'),
+  loopLastValue: document.getElementById('loopLastValue'),
+  loopMaxValue: document.getElementById('loopMaxValue'),
+  stepTotalValue: document.getElementById('stepTotalValue'),
+  stepWindowValue: document.getElementById('stepWindowValue'),
   loadCellSourceValue: document.getElementById('loadCellSourceValue'),
   loadCellRawValue: document.getElementById('loadCellRawValue'),
   loadCellThresholdValue: document.getElementById('loadCellThresholdValue'),
@@ -85,6 +89,12 @@ const state = {
     fault: 0,
     cycles: 0,
     done: 0,
+    loopLastUs: 0,
+    loopMaxUs: 0,
+    stepsTotal: 0,
+    stepsHeartbeat: 0,
+    stepsBurst: 0,
+    tmcSync: 0,
     driver: { uart: null, irun: null, ihold: null, iholddelay: null, tpowerdown: null, sgthrs: null }
   },
   chartSamples: [],
@@ -183,6 +193,10 @@ function updateTelemetryCardValues() {
   dom.cycleDoneValue.textContent = `Done ${state.telemetry.done}`;
   dom.driverCurrentValue.textContent = `I${displayDriverValue(driver.irun)} / H${displayDriverValue(driver.ihold)}`;
   dom.driverThresholdValue.textContent = `SG ${displayDriverValue(driver.sgthrs)} / UART ${displayDriverValue(driver.uart)}`;
+  dom.loopLastValue.textContent = `${state.telemetry.loopLastUs} us`;
+  dom.loopMaxValue.textContent = `Max ${state.telemetry.loopMaxUs} us`;
+  dom.stepTotalValue.textContent = String(state.telemetry.stepsTotal);
+  dom.stepWindowValue.textContent = `HB ${state.telemetry.stepsHeartbeat} / Burst ${state.telemetry.stepsBurst} / Sync ${state.telemetry.tmcSync}`;
 
   if (Number.isFinite(driver.irun)) {
     dom.irunInput.value = String(driver.irun);
@@ -545,7 +559,13 @@ function handleTelemetryLine(line) {
       pos: parsed.pos ?? state.telemetry.pos,
       target: parsed.target ?? state.telemetry.target,
       cycles: parsed.cycles ?? state.telemetry.cycles,
-      done: parsed.done ?? state.telemetry.done
+      done: parsed.done ?? state.telemetry.done,
+      loopLastUs: parsed.loop_last_us ?? state.telemetry.loopLastUs,
+      loopMaxUs: parsed.loop_max_us ?? state.telemetry.loopMaxUs,
+      stepsTotal: parsed.steps_total ?? state.telemetry.stepsTotal,
+      stepsHeartbeat: parsed.steps_hb ?? state.telemetry.stepsHeartbeat,
+      stepsBurst: parsed.steps_burst ?? state.telemetry.stepsBurst,
+      tmcSync: parsed.tmc_sync ?? state.telemetry.tmcSync
     });
     updateTelemetryCardValues();
     pushChartSample(state.telemetry.force, state.telemetry.pos);
@@ -560,7 +580,13 @@ function handleTelemetryLine(line) {
       homed: parsed.homed ?? state.telemetry.homed,
       hold: parsed.hold ?? state.telemetry.hold,
       pos: parsed.pos ?? state.telemetry.pos,
-      target: parsed.target ?? state.telemetry.target
+      target: parsed.target ?? state.telemetry.target,
+      loopLastUs: parsed.loop_last_us ?? state.telemetry.loopLastUs,
+      loopMaxUs: parsed.loop_max_us ?? state.telemetry.loopMaxUs,
+      stepsTotal: parsed.steps_total ?? state.telemetry.stepsTotal,
+      stepsHeartbeat: parsed.steps_hb ?? state.telemetry.stepsHeartbeat,
+      stepsBurst: parsed.steps_burst ?? state.telemetry.stepsBurst,
+      tmcSync: parsed.tmc_sync ?? state.telemetry.tmcSync
     });
     updateTelemetryCardValues();
     pushChartSample(state.telemetry.force, state.telemetry.pos);
