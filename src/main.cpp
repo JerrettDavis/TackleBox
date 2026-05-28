@@ -2011,11 +2011,6 @@ static void refresh_load_cell_input(void)
     pin_write_low(config.pins.clock);
     delay_cycles(pulse_cycles);
 
-    if (pin_read(config.pins.data) == 0U)
-    {
-        g_load_cell_hx711_ready = 1U;
-    }
-
     load_cell_set_hx711_sample(&g_load_cell, load_cell_hx711_decode_u24(sample));
 }
 
