@@ -690,14 +690,6 @@ static int32_t ui_current_edit_value(UiScreen screen, uint8_t cursor, const Pers
     return 0;
 }
 
-static uint8_t ui_item_is_editable(UiScreen screen, uint8_t cursor)
-{
-    return ((screen == UiScreen::Motion) && ((cursor == 4U) || (cursor == 7U) || (cursor == 8U))) ||
-           ((screen == UiScreen::Measure) && (cursor == 0U)) ||
-           ((screen == UiScreen::Driver) && (cursor <= 3U)) ||
-           ((screen == UiScreen::Config) && (cursor <= 7U));
-}
-
 static Mini12864UiIntent make_intent(Mini12864UiIntentType type, int32_t value)
 {
     Mini12864UiIntent intent = {type, value};
@@ -1124,54 +1116,6 @@ static void display_begin_frame(
 
     g_display_flush_page = 0U;
     g_display_frame_pending = 1U;
-}
-
-static void display_render_page_zero(
-    const keyswitch::MotionInputs &inputs,
-    const keyswitch::MotionState &state,
-    const keyswitch::MotionOutputs &outputs,
-    const Mini12864PanelInputs &panel_inputs)
-{
-    char line[22];
-    framebuffer_draw_text(0U, 0U, "PG0 STATUS");
-    snprintf(line, sizeof(line), "POS:%ld", (long)state.currentPosition);
-    framebuffer_draw_text(0U, 8U, line);
-    snprintf(line, sizeof(line), "TGT:%ld", (long)state.targetPosition);
-    framebuffer_draw_text(0U, 16U, line);
-    snprintf(line, sizeof(line), "RAW:%lu LD:%u", (unsigned long)inputs.loadCellRaw, (unsigned int)outputs.loadCellTriggered);
-    framebuffer_draw_text(0U, 24U, line);
-    snprintf(line, sizeof(line), "XST:%u CF:%u", (unsigned int)outputs.xStopPressed, (unsigned int)outputs.xStopConfirmed);
-    framebuffer_draw_text(0U, 32U, line);
-    snprintf(line, sizeof(line), "STA:%u SRC:%u", (unsigned int)state.homingState, (unsigned int)outputs.stopSource);
-    framebuffer_draw_text(0U, 40U, line);
-    snprintf(line, sizeof(line), "HM:%u FL:%u", (unsigned int)state.homed, (unsigned int)state.faultLatch);
-    framebuffer_draw_text(0U, 48U, line);
-    snprintf(line, sizeof(line), "UI C:%u A:%u B:%u", (unsigned int)panel_inputs.clickPressed, (unsigned int)panel_inputs.encoderAActive, (unsigned int)panel_inputs.encoderBActive);
-    framebuffer_draw_text(0U, 56U, line);
-}
-
-static void display_render_page_one(
-    const keyswitch::MotionInputs &inputs,
-    const keyswitch::MotionState &state,
-    const keyswitch::MotionOutputs &outputs,
-    const Mini12864PanelInputs &panel_inputs)
-{
-    char line[22];
-    framebuffer_draw_text(0U, 0U, "PG1 MOTION");
-    snprintf(line, sizeof(line), "PRESS:%ld", (long)state.pressTargetPosition);
-    framebuffer_draw_text(0U, 8U, line);
-    snprintf(line, sizeof(line), "CYC:%lu DON:%lu", (unsigned long)state.cycleCountRemaining, (unsigned long)state.completedCycles);
-    framebuffer_draw_text(0U, 16U, line);
-    snprintf(line, sizeof(line), "BK:%lu SK:%lu", (unsigned long)state.backoffStepsRemaining, (unsigned long)state.seekSteps);
-    framebuffer_draw_text(0U, 24U, line);
-    snprintf(line, sizeof(line), "MECH:%u STL:%u", (unsigned int)outputs.mechanicalFallbackTriggered, (unsigned int)outputs.stallDetected);
-    framebuffer_draw_text(0U, 32U, line);
-    snprintf(line, sizeof(line), "LOAD:%u HOME:%u", (unsigned int)outputs.loadCellTriggered, (unsigned int)state.homed);
-    framebuffer_draw_text(0U, 40U, line);
-    snprintf(line, sizeof(line), "CLK:%u ENC:%u%u", (unsigned int)panel_inputs.clickPressed, (unsigned int)panel_inputs.encoderAActive, (unsigned int)panel_inputs.encoderBActive);
-    framebuffer_draw_text(0U, 48U, line);
-    snprintf(line, sizeof(line), "FORCE:%lu", (unsigned long)inputs.loadCellRaw);
-    framebuffer_draw_text(0U, 56U, line);
 }
 
 static int8_t display_consume_encoder_steps(const Mini12864PanelInputs &panel_inputs)

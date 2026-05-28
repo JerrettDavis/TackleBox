@@ -508,7 +508,15 @@ Set-Location "c:\git\BTT SKR2 Testing"
 & ".\test\run_stlink_validation.ps1"
 ```
 
-GitHub Actions hardware validation is defined in `.github/workflows/hardware-validation.yml` and expects a self-hosted runner labeled `windows` and `keyswitch-hil` with the SKR2 board, ST-Link, and USB CDC path connected.
+GitHub Actions hardware validation is defined in `.github/workflows/hardware-validation.yml` and is intentionally `workflow_dispatch` only. That keeps normal pushes from queueing indefinitely when no self-hosted bench runner is available, while still allowing explicit HIL runs once a runner labeled `windows` and `keyswitch-hil` is online.
+
+If no GitHub runner is available, use the local bench scripts directly instead of waiting on Actions:
+
+```powershell
+Set-Location "c:\git\BTT SKR2 Testing"
+& ".\test\run_ci_checks.ps1"
+& ".\test\run_stlink_validation.ps1"
+```
 
 The host test runner compiles and executes:
 

@@ -2,18 +2,15 @@ name: Hardware Validation
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - master
-      - develop
 
 jobs:
   hardware-validation:
+    name: Self-hosted bench validation
     runs-on:
       - self-hosted
       - windows
       - keyswitch-hil
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
