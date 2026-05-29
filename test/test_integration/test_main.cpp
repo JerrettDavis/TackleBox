@@ -10,6 +10,7 @@ keyswitch::MotionConfig make_config()
 {
     keyswitch::MotionConfig config = {};
     config.seekStepLimit = 10U;
+    config.probeContactThresholdRaw = 100U;
     config.minPosition = 0;
     config.maxPosition = 10;
     config.debounceCount = 3U;
@@ -134,6 +135,30 @@ void test_integration_home_command_restarts_motion_model(void)
     require_true(outputs.issueStep == 1U, "HOME should resume stepping once switch is open");
 }
 
+void test_integration_home_command_ignores_load_cell_until_switch(void)
+{
+    keyswitch::MotionConfig config = make_config();
+    keyswitch::RuntimeConfig runtime = make_runtime();
+    keyswitch::MotionState state = keyswitch::makeInitialState(0U);
+
+    apply_command_to_domain(keyswitch::parseCommand("HOME"), &state, config, 10U);
+
+    keyswitch::MotionInputs inputs = make_inputs(20U, 1U);
+    inputs.loadCellTriggered = 1U;
+    keyswitch::MotionOutputs outputs = keyswitch::tickMotion(&state, inputs, config, runtime);
+
+    require_true(state.homingState == keyswitch::HomingState::Seek, "HOME should ignore load-cell trips while seeking the endstop");
+    require_true(outputs.issueStep == 1U, "HOME should keep stepping until the endstop is reached");
+    require_true(state.lastStopSource == keyswitch::StopSource::None, "HOME should not record the load cell as the stop source");
+
+    outputs = keyswitch::tickMotion(&state, make_inputs(30U, 0U), config, runtime);
+    outputs = keyswitch::tickMotion(&state, make_inputs(40U, 0U), config, runtime);
+    outputs = keyswitch::tickMotion(&state, make_inputs(50U, 0U), config, runtime);
+
+    require_true(state.homingState == keyswitch::HomingState::Backoff, "HOME should still transition when the endstop is confirmed");
+    require_true(outputs.stopSource == keyswitch::StopSource::MechanicalFallback, "HOME should report the endstop-backed stop source");
+}
+
 void test_integration_absolute_move_command_reaches_target(void)
 {
     keyswitch::MotionConfig config = make_config();
@@ -208,6 +233,33 @@ void test_integration_cycle_command_returns_home_after_load_cell_trip(void)
     require_true(state.completedCycles == 1U, "interrupted cycle should still count as a completed probe cycle");
     require_true(state.currentPosition == 0, "interrupted cycle should settle back at home");
     require_true(state.homingState == keyswitch::HomingState::Done, "interrupted cycle should settle back into Done state");
+}
+
+void test_integration_cycle_command_latches_contact_before_hard_stop(void)
+{
+    keyswitch::MotionConfig config = make_config();
+    keyswitch::RuntimeConfig runtime = make_runtime();
+    keyswitch::MotionState state = keyswitch::makeInitialState(0U);
+
+    apply_command_to_domain(keyswitch::parseCommand("SETPOS 0"), &state, config, 1U);
+    apply_command_to_domain(keyswitch::parseCommand("PRESSPOS 4"), &state, config, 2U);
+    apply_command_to_domain(keyswitch::parseCommand("CYCLE 1"), &state, config, 3U);
+
+    keyswitch::MotionInputs inputs = make_inputs(10U, 1U);
+    inputs.loadCellRaw = 120U;
+    keyswitch::MotionOutputs outputs = keyswitch::tickMotion(&state, inputs, config, runtime);
+
+    require_true(state.probeContactActive == 1U, "cycle command should latch first contact from raw force before the hard threshold trips");
+    require_true(state.homingState == keyswitch::HomingState::CycleToPress, "first contact should not end the probe press leg");
+    require_true(outputs.issueStep == 1U, "first contact should keep the press leg moving");
+
+    inputs = make_inputs(11U, 1U);
+    inputs.loadCellRaw = 1000U;
+    inputs.loadCellTriggered = 1U;
+    outputs = keyswitch::tickMotion(&state, inputs, config, runtime);
+
+    require_true(state.homingState == keyswitch::HomingState::CycleToHome, "load-cell threshold should still start the release leg");
+    require_true(outputs.stopSource == keyswitch::StopSource::LoadCell, "load-cell threshold should remain the recorded stop source");
 }
 
 void test_integration_stop_command_cancels_active_motion(void)
@@ -293,10 +345,12 @@ int main()
     try
     {
         test_integration_home_command_restarts_motion_model();
+        test_integration_home_command_ignores_load_cell_until_switch();
         test_integration_absolute_move_command_reaches_target();
         test_integration_relative_move_alias_reaches_target();
         test_integration_cycle_command_completes_press_and_return_home();
         test_integration_cycle_command_returns_home_after_load_cell_trip();
+        test_integration_cycle_command_latches_contact_before_hard_stop();
         test_integration_stop_command_cancels_active_motion();
         test_integration_motion_faults_when_load_cell_triggers_mid_move();
         test_integration_homed_idle_state_stays_disabled_until_explicit_hold_enable();

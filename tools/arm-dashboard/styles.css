@@ -485,7 +485,7 @@ body.is-disconnected .live-workspace {
 }
 
 .load-cell-meta {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
 }
 
 .setup-summary-grid {
@@ -537,6 +537,14 @@ body.is-disconnected .live-workspace {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
+}
+
+.precision-config-form {
+  margin-bottom: 14px;
+}
+
+.precision-config-form .triple-input-row {
+  align-items: end;
 }
 
 .setup-section-title {
@@ -763,7 +771,6 @@ code {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .load-cell-meta,
   .setup-summary-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -789,7 +796,6 @@ code {
   }
 
   .telemetry-cards,
-  .load-cell-meta,
   .setup-summary-grid,
   .triple-input-row,
   .common-actions-grid,

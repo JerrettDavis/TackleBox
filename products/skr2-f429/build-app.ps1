@@ -5,5 +5,5 @@ Set-Location $repoRoot
 
 $platformIo = Resolve-ProductPlatformIoCommand
 
-& $platformIo.Executable @($platformIo.Arguments) 'run' '-e' 'skr2_f429_bootloader_cdc' '-t' 'upload' @args
+& $platformIo.Executable @($platformIo.Arguments) 'run' '-e' 'skr2_f429_usb' @args
 exit $LASTEXITCODE

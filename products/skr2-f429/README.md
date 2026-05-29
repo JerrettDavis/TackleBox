@@ -43,12 +43,15 @@ The current target is the BigTreeTech SKR 2 board using the STM32F429VGT6 MCU. T
 ## Product-Owned Entry Points
 
 - discover board state: `products/skr2-f429/discover.ps1`
-- flash application: `products/skr2-f429/flash-app.ps1`
+- build application: `products/skr2-f429/build-app.ps1`
+- flash application over USB CDC: `products/skr2-f429/flash-app.ps1`
+- recover application over ST-Link: `products/skr2-f429/recover-app.ps1`
+- build BootAnchor: `products/skr2-f429/build-bootanchor.ps1`
 - flash BootAnchor: `products/skr2-f429/flash-bootanchor.ps1`
 - install Boatswain config package: `products/skr2-f429/install-boatswain-package.ps1`
 - validate runtime USB surface: `products/skr2-f429/validate-runtime.ps1`
 - validate BootAnchor and transitions: `products/skr2-f429/validate-bootanchor.ps1`
-- run the full current validation spine: `products/skr2-f429/validate-all.ps1`
+- validate the product wrapper workflow: `products/skr2-f429/validate-all.ps1`
 - package release artifacts: `products/skr2-f429/package-release.ps1`
 
 ## USB Identity
@@ -68,6 +71,9 @@ These COM port numbers are not stable identifiers. Scripts should resolve device
 
 ## Primary Workflows
 
+Policy:
+Use the product-owned scripts as the normal operator surface. For the application image, prefer USB CDC flashing via `flash-app.ps1`. Reserve ST-Link app flashing for diagnostics, recovery, or when the USB bootloader path is unavailable. Use ST-Link for first-time BootAnchor deployment.
+
 ### Local validation
 
 ```powershell
@@ -82,18 +88,39 @@ Set-Location "c:\git\BTT SKR2 Testing"
 act -j validate-linux
 ```
 
+### Build application
+
+```powershell
+Set-Location "c:\git\BTT SKR2 Testing"
+& ".\products\skr2-f429\build-app.ps1"
+```
+
+### Build BootAnchor
+
+```powershell
+Set-Location "c:\git\BTT SKR2 Testing"
+& ".\products\skr2-f429\build-bootanchor.ps1"
+```
+
 ### Flash BootAnchor via ST-Link
 
 ```powershell
 Set-Location "c:\git\BTT SKR2 Testing"
-python -m platformio run -e skr2_f429_bootloader_cdc -t upload
+& ".\products\skr2-f429\flash-bootanchor.ps1"
 ```
 
-### Flash application via CDC
+### Flash application via USB CDC
 
 ```powershell
 Set-Location "c:\git\BTT SKR2 Testing"
 & ".\products\skr2-f429\flash-app.ps1" -EnterBootloader -FirmwarePath ".\.pio\build\skr2_f429_usb\firmware.bin" -SkipBuild
+```
+
+### Recover application via ST-Link
+
+```powershell
+Set-Location "c:\git\BTT SKR2 Testing"
+& ".\products\skr2-f429\recover-app.ps1"
 ```
 
 ### Operator control via SpyGlass wrapper
@@ -127,7 +154,7 @@ The current release-quality validation for this reference product is:
 4. `test/run_bootloader_serial_tests.ps1`
 5. `test/run_live_serial_tests.ps1`
 
-The product-owned wrapper for that spine is `products/skr2-f429/validate-all.ps1`.
+Use `products/skr2-f429/validate-all.ps1` to exercise the operator-facing wrapper flow in the preferred order: app build, BootAnchor build, USB app flash, then ST-Link app recovery.
 
 ## Reference Docs
 

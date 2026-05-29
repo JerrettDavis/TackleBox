@@ -17,6 +17,7 @@ Production readiness here means more than a successful flash:
 Host tests are the fastest path for:
 
 - protocol parsing
+- config defaults, persistence integrity, and telemetry contract checks
 - motion-domain behavior
 - safety state transitions
 - TMC frame encoding and decoding
@@ -41,7 +42,7 @@ Hardware validation remains required for:
 
 ## Required Test Growth Areas
 
-1. Config source precedence and persistence integrity.
+1. Config source precedence, including boot-source selection and MicroSD/USB precedence paths. Persistence integrity now has direct host coverage in `test_app_runtime_config`.
 2. TMC verification lockout behavior.
 3. Telemetry contract stability.
 4. Sensor fault handling and fallback source selection.

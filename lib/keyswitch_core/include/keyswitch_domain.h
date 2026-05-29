@@ -26,6 +26,7 @@ enum class StopSource : uint8_t {
 
 struct MotionConfig {
     uint32_t seekStepLimit;
+    uint32_t probeContactThresholdRaw;
     int32_t minPosition;
     int32_t maxPosition;
     uint32_t debounceCount;
@@ -67,8 +68,10 @@ struct MotionState {
     int32_t currentPosition;
     int32_t targetPosition;
     int32_t pressTargetPosition;
+    int32_t probeContactPosition;
     uint32_t cycleCountRemaining;
     uint32_t completedCycles;
+    uint8_t probeContactActive;
     StopSource lastStopSource;
 };
 

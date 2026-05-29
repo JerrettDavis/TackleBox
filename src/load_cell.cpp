@@ -4,27 +4,164 @@
 #include <string.h>
 
 static const uint8_t kHx711TriggerDebounceCount = 3U;
+static const uint8_t kHx711CompositeSampleCount = 3U;
 static const uint8_t kHx711WarmupSampleCount = 16U;
 static const uint8_t kHx711AutoTareSampleCount = 16U;
+static const uint8_t kHx711DefaultReleaseRate = 2U;
+static const uint8_t kHx711DefaultRiseRate = 4U;
+
+static uint32_t load_cell_default_display_full_scale_raw(uint32_t threshold)
+{
+    uint32_t full_scale_raw = threshold;
+    if (full_scale_raw == 0U)
+    {
+        return 4000U;
+    }
+
+    if (full_scale_raw <= (UINT32_MAX / 4U))
+    {
+        full_scale_raw *= 4U;
+    }
+
+    return (full_scale_raw < 4000U) ? 4000U : full_scale_raw;
+}
 
 static uint32_t hx711_idle_force_floor(uint32_t threshold)
 {
     return (threshold > 0U) ? ((threshold / 16U) + 1U) : 16U;
 }
 
-static void load_cell_update_hx711_trigger_state(LoadCellRuntime *runtime)
+static uint8_t hx711_release_rate_or_default(uint8_t configured_rate)
+{
+    return (configured_rate == 0U) ? kHx711DefaultReleaseRate : configured_rate;
+}
+
+static uint8_t hx711_rise_rate_or_default(uint8_t configured_rate)
+{
+    return (configured_rate == 0U) ? kHx711DefaultRiseRate : configured_rate;
+}
+
+static uint32_t hx711_composite_span_limit(uint32_t threshold)
+{
+    uint32_t span_limit = (threshold / 8U) + 32U;
+    if (span_limit < 64U)
+    {
+        span_limit = 64U;
+    }
+    if (span_limit > 512U)
+    {
+        span_limit = 512U;
+    }
+    return span_limit;
+}
+
+static void hx711_reset_composite_window(LoadCellRuntime *runtime)
 {
     if (runtime == 0)
     {
         return;
     }
 
+    runtime->hx711CompositeCount = 0U;
+    memset(runtime->hx711CompositeSamples, 0, sizeof(runtime->hx711CompositeSamples));
+}
+
+static void hx711_push_composite_sample(LoadCellRuntime *runtime, int32_t sample)
+{
+    if (runtime == 0)
+    {
+        return;
+    }
+
+    if (runtime->hx711CompositeCount < kHx711CompositeSampleCount)
+    {
+        runtime->hx711CompositeSamples[runtime->hx711CompositeCount] = sample;
+        ++runtime->hx711CompositeCount;
+        return;
+    }
+
+    runtime->hx711CompositeSamples[0] = runtime->hx711CompositeSamples[1];
+    runtime->hx711CompositeSamples[1] = runtime->hx711CompositeSamples[2];
+    runtime->hx711CompositeSamples[2] = sample;
+}
+
+static int32_t hx711_median3(int32_t a, int32_t b, int32_t c)
+{
+    if (a > b)
+    {
+        const int32_t temp = a;
+        a = b;
+        b = temp;
+    }
+    if (b > c)
+    {
+        const int32_t temp = b;
+        b = c;
+        c = temp;
+    }
+    if (a > b)
+    {
+        const int32_t temp = a;
+        a = b;
+        b = temp;
+    }
+    return b;
+}
+
+static uint8_t hx711_try_get_composite_sample(const LoadCellRuntime *runtime, uint32_t threshold, int32_t *sample)
+{
+    if ((runtime == 0) || (sample == 0) || (runtime->hx711CompositeCount < kHx711CompositeSampleCount))
+    {
+        return 0U;
+    }
+
+    int32_t min_sample = runtime->hx711CompositeSamples[0];
+    int32_t max_sample = runtime->hx711CompositeSamples[0];
+    for (uint8_t index = 1U; index < kHx711CompositeSampleCount; ++index)
+    {
+        const int32_t candidate = runtime->hx711CompositeSamples[index];
+        if (candidate < min_sample)
+        {
+            min_sample = candidate;
+        }
+        if (candidate > max_sample)
+        {
+            max_sample = candidate;
+        }
+    }
+
+    if ((uint32_t)(max_sample - min_sample) > hx711_composite_span_limit(threshold))
+    {
+        return 0U;
+    }
+
+    *sample = hx711_median3(
+        runtime->hx711CompositeSamples[0],
+        runtime->hx711CompositeSamples[1],
+        runtime->hx711CompositeSamples[2]);
+    return 1U;
+}
+
+static uint8_t saturating_add_u8(uint8_t value, uint8_t amount)
+{
+    return (uint8_t)((value > (uint8_t)(255U - amount)) ? 255U : (value + amount));
+}
+
+static void load_cell_update_hx711_trigger_state_weighted(LoadCellRuntime *runtime, uint8_t sample_weight)
+{
+    if (runtime == 0)
+    {
+        return;
+    }
+
+    if (sample_weight == 0U)
+    {
+        sample_weight = 1U;
+    }
+
     if (runtime->raw >= runtime->threshold)
     {
-        if (runtime->overThresholdCount < 255U)
-        {
-            ++runtime->overThresholdCount;
-        }
+        runtime->overThresholdCount = saturating_add_u8(runtime->overThresholdCount, sample_weight);
         runtime->underThresholdCount = 0U;
         if (runtime->overThresholdCount >= kHx711TriggerDebounceCount)
         {
@@ -33,10 +170,7 @@ static void load_cell_update_hx711_trigger_state(LoadCellRuntime *runtime)
         return;
     }
 
-    if (runtime->underThresholdCount < 255U)
-    {
-        ++runtime->underThresholdCount;
-    }
+    runtime->underThresholdCount = saturating_add_u8(runtime->underThresholdCount, sample_weight);
     runtime->overThresholdCount = 0U;
     if (runtime->underThresholdCount >= kHx711TriggerDebounceCount)
     {
@@ -44,9 +178,43 @@ static void load_cell_update_hx711_trigger_state(LoadCellRuntime *runtime)
     }
 }
 
-static uint32_t blend_u32(uint32_t current, uint32_t next)
+static void load_cell_update_hx711_trigger_state(LoadCellRuntime *runtime)
 {
-    return (current == 0U) ? next : (((current * 3U) + next) / 4U);
+    load_cell_update_hx711_trigger_state_weighted(runtime, 1U);
+}
+
+static uint32_t blend_u32_rise(uint32_t current, uint32_t next, uint8_t rise_rate)
+{
+    if ((current == 0U) || (current >= next))
+    {
+        return next;
+    }
+
+    const uint8_t divisor = hx711_rise_rate_or_default(rise_rate);
+    if (divisor <= 1U)
+    {
+        return next;
+    }
+
+    return current + ((next - current + (uint32_t)divisor - 1U) / (uint32_t)divisor);
+}
+
+static uint32_t blend_u32_fall(uint32_t current, uint32_t next, uint8_t release_rate)
+{
+    if (current <= next)
+    {
+        return next;
+    }
+
+    const uint8_t divisor = hx711_release_rate_or_default(release_rate);
+    if (divisor <= 1U)
+    {
+        return next;
+    }
+
+    const uint32_t delta = current - next;
+    const uint32_t step = (delta + (uint32_t)divisor - 1U) / (uint32_t)divisor;
+    return current - step;
 }
 
 LoadCellRuntime load_cell_make_default(uint32_t threshold)
@@ -54,6 +222,8 @@ LoadCellRuntime load_cell_make_default(uint32_t threshold)
     LoadCellRuntime runtime = {};
     runtime.source = (uint8_t)LoadCellSourceKind::Simulation;
     runtime.threshold = threshold;
+    runtime.hx711ReleaseRate = kHx711DefaultReleaseRate;
+    runtime.hx711RiseRate = kHx711DefaultRiseRate;
     return runtime;
 }
 
@@ -75,10 +245,13 @@ void load_cell_apply_config(LoadCellRuntime *runtime, const LoadCellConfig &conf
         runtime->hx711TareReady = 0U;
         runtime->hx711Baseline = 0;
         runtime->hx711Accumulator = 0;
+        hx711_reset_composite_window(runtime);
     }
 
     runtime->source = config.source;
     runtime->threshold = config.threshold;
+    runtime->hx711ReleaseRate = hx711_release_rate_or_default(config.hx711ReleaseRate);
+    runtime->hx711RiseRate = hx711_rise_rate_or_default(config.hx711RiseRate);
 }
 
 void load_cell_set_raw(LoadCellRuntime *runtime, uint32_t raw)
@@ -121,6 +294,7 @@ void load_cell_set_hx711_sample(LoadCellRuntime *runtime, int32_t sample)
             runtime->triggerState = 0U;
             runtime->overThresholdCount = 0U;
             runtime->underThresholdCount = 0U;
+            hx711_reset_composite_window(runtime);
             return;
         }
 
@@ -130,6 +304,7 @@ void load_cell_set_hx711_sample(LoadCellRuntime *runtime, int32_t sample)
         runtime->triggerState = 0U;
         runtime->overThresholdCount = 0U;
         runtime->underThresholdCount = 0U;
+        hx711_reset_composite_window(runtime);
         if (runtime->hx711TareSamples >= kHx711AutoTareSampleCount)
         {
             runtime->hx711Baseline = runtime->hx711Accumulator / (int32_t)runtime->hx711TareSamples;
@@ -139,14 +314,31 @@ void load_cell_set_hx711_sample(LoadCellRuntime *runtime, int32_t sample)
         return;
     }
 
-    const int32_t relative_sample = sample - runtime->hx711Baseline;
+    hx711_push_composite_sample(runtime, sample - runtime->hx711Baseline);
+
+    int32_t relative_sample = 0;
+    if (hx711_try_get_composite_sample(runtime, runtime->threshold, &relative_sample) == 0U)
+    {
+        return;
+    }
+
     const uint32_t relative_force = load_cell_force_from_signed(relative_sample);
-    runtime->raw = blend_u32(runtime->raw, relative_force);
+    runtime->raw = (relative_force >= runtime->raw)
+        ? blend_u32_rise(runtime->raw, relative_force, runtime->hx711RiseRate)
+        : blend_u32_fall(runtime->raw, relative_force, runtime->hx711ReleaseRate);
 
     const uint32_t idle_force_floor = hx711_idle_force_floor(runtime->threshold);
     if ((relative_force < idle_force_floor) && (runtime->raw < idle_force_floor))
     {
         runtime->raw = 0U;
+    }
+    else if (relative_force < idle_force_floor)
+    {
+        const uint32_t quiet_snap_limit = ((runtime->threshold > 0U) ? (runtime->threshold / 8U) : 0U) + idle_force_floor;
+        if (runtime->raw <= quiet_snap_limit)
+        {
+            runtime->raw = 0U;
+        }
     }
 
     if (relative_force < ((runtime->threshold > 0U) ? ((runtime->threshold / 8U) + 1U) : 32U))
@@ -154,7 +346,7 @@ void load_cell_set_hx711_sample(LoadCellRuntime *runtime, int32_t sample)
         runtime->hx711Baseline = runtime->hx711Baseline + (relative_sample / 8);
     }
 
-    load_cell_update_hx711_trigger_state(runtime);
+    load_cell_update_hx711_trigger_state_weighted(runtime, kHx711CompositeSampleCount);
 }
 
 void load_cell_set_threshold(LoadCellRuntime *runtime, uint32_t threshold)
@@ -189,6 +381,7 @@ void load_cell_tare(LoadCellRuntime *runtime)
         runtime->hx711TareReady = 0U;
         runtime->hx711Baseline = 0;
         runtime->hx711Accumulator = 0;
+        hx711_reset_composite_window(runtime);
     }
 }
 
@@ -228,6 +421,7 @@ void load_cell_clear(LoadCellRuntime *runtime)
     runtime->hx711TareReady = 0U;
     runtime->hx711Baseline = 0;
     runtime->hx711Accumulator = 0;
+    hx711_reset_composite_window(runtime);
     runtime->mechanicalFallbackOverride = 0U;
     runtime->stallOverride = 0U;
 }
@@ -283,6 +477,22 @@ uint32_t load_cell_force_from_signed(int32_t sample)
 
     return (uint32_t)(-sample);
 }
+
+uint32_t load_cell_calibrated_grams(uint32_t raw, const LoadCellConfig &config)
+    {
+        uint32_t reference_raw = config.calibrationRaw;
+        uint32_t reference_grams = config.calibrationGrams;
+
+        if ((reference_raw == 0U) || (reference_grams == 0U))
+        {
+            reference_raw = load_cell_default_display_full_scale_raw(config.threshold);
+            reference_grams = 100U;
+        }
+
+        uint64_t scaled = ((uint64_t)raw * (uint64_t)reference_grams) + ((uint64_t)reference_raw / 2ULL);
+        uint32_t grams = (uint32_t)(scaled / (uint64_t)reference_raw);
+        return (grams > 1999U) ? 1999U : grams;
+    }
 
 const char *load_cell_source_name(uint8_t source)
 {

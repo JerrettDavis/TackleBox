@@ -33,6 +33,8 @@ $commonArgs = @(
     '-I', (Join-Path $root 'src')
 )
 
+$supportInclude = Join-Path $PSScriptRoot 'support\include'
+
 $domainSources = @(
     (Join-Path $root 'lib\keyswitch_core\src\keyswitch_domain.cpp')
 )
@@ -68,6 +70,19 @@ $tests = @(
         );
     },
     @{
+        Name = 'test_app_runtime_config';
+        Sources = $protocolSources + @(
+            (Join-Path $root 'src\load_cell.cpp'),
+            (Join-Path $root 'src\app_runtime_config.cpp'),
+            (Join-Path $PSScriptRoot 'support\app_runtime_config_host_stubs.cpp'),
+            (Join-Path $PSScriptRoot 'test_app_runtime_config\test_main.cpp')
+        );
+        ExtraArgs = @(
+            '-DKEYSWITCH_HOST_TEST',
+            '-I', $supportInclude
+        );
+    },
+    @{
         Name = 'test_domain';
         Sources = $domainSources + @(Join-Path $PSScriptRoot 'test_domain\test_main.cpp');
     },
@@ -86,7 +101,12 @@ $tests = @(
 
 foreach ($test in $tests) {
     $exePath = Join-Path $outDir ($test.Name + '.exe')
-    & $compiler @commonArgs @($test.Sources) '-o' $exePath
+    $args = @($commonArgs)
+    if ($test.ContainsKey('ExtraArgs')) {
+        $args += $test.ExtraArgs
+    }
+
+    & $compiler @args @($test.Sources) '-o' $exePath
     if ($LASTEXITCODE -ne 0) {
         throw "Compile failed for $($test.Name)"
     }

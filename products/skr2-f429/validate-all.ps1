@@ -1,17 +1,39 @@
+param(
+    [string]$AppPortName,
+    [switch]$SkipUsbFlash,
+    [switch]$SkipRecovery
+)
+
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$tool = Join-Path $repoRoot 'test\run_ci_checks.ps1'
+Set-Location $repoRoot
 
-& $tool @args
+$appBuildTool = Join-Path $PSScriptRoot 'build-app.ps1'
+& $appBuildTool
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-$bootTool = Join-Path $PSScriptRoot 'validate-bootanchor.ps1'
-& $bootTool
+$bootBuildTool = Join-Path $PSScriptRoot 'build-bootanchor.ps1'
+& $bootBuildTool
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-$runtimeTool = Join-Path $PSScriptRoot 'validate-runtime.ps1'
-& $runtimeTool
-exit $LASTEXITCODE
+if (-not $SkipUsbFlash) {
+    $firmwarePath = Join-Path $repoRoot '.pio\build\skr2_f429_usb\firmware.bin'
+    $appFlashTool = Join-Path $PSScriptRoot 'flash-app.ps1'
+    & $appFlashTool -EnterBootloader -FirmwarePath $firmwarePath -SkipBuild -AppPortName $AppPortName
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+
+if (-not $SkipRecovery) {
+    $recoverTool = Join-Path $PSScriptRoot 'recover-app.ps1'
+    & $recoverTool
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+
+exit 0

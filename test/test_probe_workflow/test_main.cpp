@@ -12,6 +12,7 @@ namespace {
 
 struct ProbeWorkflowOptions {
     uint32_t threshold = 1000U;
+    uint32_t contactDetectRaw = 125U;
     int32_t pressTarget = 40;
     uint32_t cycleCount = 3U;
     int32_t contactPosition = 18;
@@ -32,12 +33,16 @@ struct ProbeSample {
     uint32_t cyclesRemaining;
     uint32_t completedCycles;
     uint8_t stopSource;
+    uint8_t contact;
+    double normalizedPosition;
 };
 
 struct ProbeWorkflowResult {
     std::vector<ProbeSample> samples;
+    uint32_t contactSamples = 0U;
     uint32_t loadCellHits = 0U;
     uint32_t maxForce = 0U;
+    int32_t firstContactPosition = -1;
     int32_t firstTriggerPosition = -1;
     int32_t finalPosition = 0;
     uint32_t completedCycles = 0U;
@@ -47,6 +52,7 @@ keyswitch::MotionConfig make_config()
 {
     keyswitch::MotionConfig config = {};
     config.seekStepLimit = 64U;
+    config.probeContactThresholdRaw = 125U;
     config.minPosition = 0;
     config.maxPosition = 80;
     config.debounceCount = 3U;
@@ -160,7 +166,19 @@ void capture_sample(
     sample.cyclesRemaining = state.cycleCountRemaining;
     sample.completedCycles = state.completedCycles;
     sample.stopSource = (uint8_t)state.lastStopSource;
+    sample.contact = state.probeContactActive;
+    sample.normalizedPosition = (state.pressTargetPosition > 0)
+        ? ((double)state.currentPosition / (double)state.pressTargetPosition)
+        : 0.0;
     result->samples.push_back(sample);
+    if (sample.contact != 0U)
+    {
+        ++result->contactSamples;
+        if (result->firstContactPosition < 0)
+        {
+            result->firstContactPosition = state.probeContactPosition;
+        }
+    }
     if (sample.force > result->maxForce)
     {
         result->maxForce = sample.force;
@@ -253,6 +271,7 @@ void run_cycle_routine(
 ProbeWorkflowResult run_probe_workflow(const ProbeWorkflowOptions &options)
 {
     keyswitch::MotionConfig config = make_config();
+    config.probeContactThresholdRaw = options.contactDetectRaw;
     keyswitch::RuntimeConfig runtime = make_runtime();
     keyswitch::MotionState state = keyswitch::makeInitialState(0U);
 
@@ -296,11 +315,14 @@ void write_export_json(const char *path, const ProbeWorkflowOptions &options, co
     output << "{\n";
     output << "  \"meta\": {\n";
     output << "    \"threshold\": " << options.threshold << ",\n";
+    output << "    \"contactDetectRaw\": " << options.contactDetectRaw << ",\n";
     output << "    \"pressTarget\": " << options.pressTarget << ",\n";
     output << "    \"cycleCount\": " << options.cycleCount << ",\n";
     output << "    \"contactPosition\": " << options.contactPosition << ",\n";
+    output << "    \"firstContactPosition\": " << result.firstContactPosition << ",\n";
     output << "    \"forceSlope\": " << options.forceSlope << ",\n";
     output << "    \"forceBias\": " << options.forceBias << ",\n";
+    output << "    \"contactSamples\": " << result.contactSamples << ",\n";
     output << "    \"loadCellHits\": " << result.loadCellHits << ",\n";
     output << "    \"maxForce\": " << result.maxForce << ",\n";
     output << "    \"completedCycles\": " << result.completedCycles << "\n";
@@ -320,6 +342,8 @@ void write_export_json(const char *path, const ProbeWorkflowOptions &options, co
                << ", \"cyclesRemaining\": " << sample.cyclesRemaining
                << ", \"completedCycles\": " << sample.completedCycles
                << ", \"stopSource\": " << (unsigned long)sample.stopSource
+               << ", \"contact\": " << (unsigned long)sample.contact
+               << ", \"normalizedPosition\": " << sample.normalizedPosition
                << "}";
         if ((index + 1U) < result.samples.size())
         {
@@ -340,7 +364,10 @@ void test_probe_workflow_completes_requested_cycles_with_load_cell_trips(void)
     require_true(result.loadCellHits == options.cycleCount, "each cycle press should trip the simulated load cell before the hard press target");
     require_true(result.finalPosition == 0, "probe workflow should return to home after the simulated routine");
     require_true(result.maxForce >= options.threshold, "simulated workflow should reach the configured threshold");
+    require_true(result.contactSamples > 0U, "simulated workflow should enter the fine probe region before the hard threshold trips");
+    require_true(result.firstContactPosition >= 0, "simulated workflow should record the first contact position");
     require_true(result.firstTriggerPosition >= 0, "simulated workflow should record the first trigger position");
+    require_true(result.firstContactPosition < result.firstTriggerPosition, "fine probe contact should occur before the hard threshold stop");
     require_true(result.firstTriggerPosition < options.pressTarget, "threshold trigger should occur before the configured press target");
 }
 
@@ -354,15 +381,21 @@ void test_probe_workflow_produces_curve_samples_for_visualization(void)
     require_true(result.samples.size() > 16U, "simulated probe workflow should emit a useful number of chart samples");
 
     uint32_t loaded_samples = 0U;
+    uint32_t contact_samples = 0U;
     for (const ProbeSample &sample : result.samples)
     {
         if (sample.load != 0U)
         {
             ++loaded_samples;
         }
+        if (sample.contact != 0U)
+        {
+            ++contact_samples;
+        }
     }
 
     require_true(loaded_samples > 0U, "response-curve export should contain threshold-crossing samples");
+    require_true(contact_samples > loaded_samples, "response-curve export should retain a fine-probe region before the hard stop samples");
 }
 
 ProbeWorkflowOptions parse_options(int argc, char **argv, const char **export_path)
@@ -380,6 +413,10 @@ ProbeWorkflowOptions parse_options(int argc, char **argv, const char **export_pa
         else if ((arg == "--threshold") && ((index + 1) < argc))
         {
             options.threshold = (uint32_t)std::stoul(argv[++index]);
+        }
+        else if ((arg == "--contact-detect-raw") && ((index + 1) < argc))
+        {
+            options.contactDetectRaw = (uint32_t)std::stoul(argv[++index]);
         }
         else if ((arg == "--press-target") && ((index + 1) < argc))
         {

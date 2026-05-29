@@ -92,9 +92,13 @@ struct LoadCellPins {
 struct LoadCellConfig {
     uint8_t source;
     uint8_t connector;
-    uint16_t reserved1;
+    uint8_t hx711ReleaseRate;
+    uint8_t hx711RiseRate;
     LoadCellPins pins;
     uint32_t threshold;
+    uint32_t calibrationRaw;
+    uint16_t calibrationGrams;
+    uint16_t reserved0;
 };
 
 struct PersistedFirmwareConfig {

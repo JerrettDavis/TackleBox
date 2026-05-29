@@ -44,7 +44,29 @@ static void stop_active_motion(MotionState *state)
 {
     state->targetPosition = state->currentPosition;
     state->cycleCountRemaining = 0U;
+    state->probeContactActive = 0U;
+    state->probeContactPosition = state->currentPosition;
     state->homingState = HomingState::Done;
+}
+
+static uint8_t probe_contact_detected(const MotionState &state, const MotionInputs &inputs, const MotionConfig &config)
+{
+    if ((state.homingState != HomingState::CycleToPress) || (state.probeContactActive != 0U))
+    {
+        return 0U;
+    }
+
+    if ((inputs.loadCellTriggered != 0U) || (inputs.mechanicalFallbackTriggered != 0U) || (inputs.stallDetected != 0U))
+    {
+        return 0U;
+    }
+
+    if (config.probeContactThresholdRaw == 0U)
+    {
+        return (inputs.loadCellRaw > 0U) ? 1U : 0U;
+    }
+
+    return (inputs.loadCellRaw >= config.probeContactThresholdRaw) ? 1U : 0U;
 }
 
 } // namespace
@@ -84,6 +106,8 @@ void resetForHome(MotionState *state, uint32_t nowMs)
     state->requireReleaseBeforeSeek = 1U;
     state->homed = 0U;
     state->targetPosition = state->currentPosition;
+    state->probeContactActive = 0U;
+    state->probeContactPosition = state->currentPosition;
     state->cycleCountRemaining = 0U;
     state->lastStopSource = StopSource::None;
 }
@@ -99,6 +123,8 @@ void forceStop(MotionState *state)
     state->backoffStepsRemaining = 0U;
     state->stopDebounce = 0U;
     state->requireReleaseBeforeSeek = 0U;
+    state->probeContactActive = 0U;
+    state->probeContactPosition = state->currentPosition;
     state->lastStopSource = StopSource::None;
 }
 
@@ -114,6 +140,8 @@ void startBackoff(MotionState *state, uint32_t nowMs, const MotionConfig &config
     state->stopDebounce = 0U;
     state->lastStatusMs = nowMs;
     state->requireReleaseBeforeSeek = 0U;
+    state->probeContactActive = 0U;
+    state->probeContactPosition = state->currentPosition;
     state->cycleCountRemaining = 0U;
     state->lastStopSource = StopSource::MechanicalFallback;
 }
@@ -142,6 +170,8 @@ void setCurrentPosition(MotionState *state, int32_t position)
 
     state->currentPosition = position;
     state->targetPosition = position;
+    state->probeContactActive = 0U;
+    state->probeContactPosition = position;
     state->homed = 1U;
     if (state->faultLatch == 0U)
     {
@@ -157,6 +187,8 @@ uint8_t queueAbsoluteMove(MotionState *state, int32_t position, const MotionConf
     }
 
     state->cycleCountRemaining = 0U;
+    state->probeContactActive = 0U;
+    state->probeContactPosition = state->currentPosition;
     state->targetPosition = position;
     state->homingState = (state->targetPosition == state->currentPosition) ? HomingState::Done : HomingState::MoveToTarget;
     return 1U;
@@ -191,6 +223,8 @@ uint8_t startCycleRoutine(MotionState *state, uint32_t count, const MotionConfig
     }
 
     state->cycleCountRemaining = count;
+    state->probeContactActive = 0U;
+    state->probeContactPosition = state->currentPosition;
     state->targetPosition = state->pressTargetPosition;
     state->homingState = (state->targetPosition == state->currentPosition) ? HomingState::CycleToHome : HomingState::CycleToPress;
     return 1U;
@@ -241,15 +275,6 @@ MotionOutputs tickMotion(
         {
             outputs.eventMessage = EVENT_WAIT_RELEASE;
             outputs.issueStep = 0U;
-        }
-        else if (inputs.loadCellTriggered != 0U)
-        {
-            state->homingState = HomingState::Backoff;
-            state->backoffStepsRemaining = config.backoffSteps;
-            state->stopDebounce = 0U;
-            state->lastStopSource = StopSource::LoadCell;
-            outputs.stopSource = state->lastStopSource;
-            outputs.eventMessage = EVENT_LOAD_CELL_HIT;
         }
         else if (inputs.stallDetected != 0U)
         {
@@ -359,6 +384,12 @@ MotionOutputs tickMotion(
             break;
         }
 
+        if (probe_contact_detected(*state, inputs, config) != 0U)
+        {
+            state->probeContactActive = 1U;
+            state->probeContactPosition = state->currentPosition;
+        }
+
         if (inputs.stepIssued != 0U)
         {
             state->currentPosition += (towards_positive != 0U) ? (int32_t)inputs.stepIssued : -(int32_t)inputs.stepIssued;
@@ -388,10 +419,14 @@ MotionOutputs tickMotion(
                 if (state->cycleCountRemaining > 0U)
                 {
                     state->targetPosition = state->pressTargetPosition;
+                    state->probeContactActive = 0U;
+                    state->probeContactPosition = state->currentPosition;
                     state->homingState = HomingState::CycleToPress;
                 }
                 else
                 {
+                    state->probeContactActive = 0U;
+                    state->probeContactPosition = state->currentPosition;
                     state->homingState = HomingState::Done;
                     outputs.driverEnable = state->holdEnabled;
                     outputs.eventMessage = EVENT_CYCLE_COMPLETE;
@@ -403,6 +438,7 @@ MotionOutputs tickMotion(
         {
             state->lastStopSource = (inputs.loadCellTriggered != 0U) ? StopSource::LoadCell : StopSource::MechanicalFallback;
             outputs.stopSource = state->lastStopSource;
+            state->probeContactActive = 1U;
             state->targetPosition = 0;
             state->homingState = HomingState::CycleToHome;
         }

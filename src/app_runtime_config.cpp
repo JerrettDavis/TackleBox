@@ -15,11 +15,97 @@
 
 static_assert((sizeof(StoredFirmwareConfig) % sizeof(uint32_t)) == 0U, "Stored config must align to flash word writes");
 
+#ifdef KEYSWITCH_HOST_TEST
+extern uintptr_t keyswitch_test_config_flash_storage_address(void);
+#endif
+
 namespace {
 
 const uint32_t CONFIG_FLASH_ADDRESS = 0x080E0000UL;
 const uint32_t CONFIG_MAGIC = 0x4B535743UL;
-const uint16_t CONFIG_VERSION = 10U;
+const uint16_t CONFIG_VERSION = 11U;
+const uint16_t CONFIG_VERSION_V10 = 10U;
+
+uintptr_t config_flash_storage_address()
+{
+#ifdef KEYSWITCH_HOST_TEST
+    return ::keyswitch_test_config_flash_storage_address();
+#else
+    return (uintptr_t)CONFIG_FLASH_ADDRESS;
+#endif
+}
+
+struct LegacyLoadCellConfigV10 {
+    uint8_t source;
+    uint8_t connector;
+    uint8_t hx711ReleaseRate;
+    uint8_t hx711RiseRate;
+    LoadCellPins pins;
+    uint32_t threshold;
+};
+
+struct LegacyPersistedFirmwareConfigV10 {
+    uint8_t motionChannelCount;
+    uint8_t activeMotionChannel;
+    uint8_t allowUnverifiedTmcMotion;
+    uint8_t reserved0;
+    MotionChannelConfig motionChannels[MOTION_CHANNEL_CAPACITY];
+    SharedRuntimePins pins;
+    LegacyLoadCellConfigV10 loadCell;
+    uint16_t stopDebounceCount;
+    uint16_t backoffSteps;
+    uint16_t stepIntervalUs;
+    uint16_t stepPulseWidthUs;
+    uint16_t tmcUartBitUs;
+    uint32_t statusIntervalMs;
+    uint32_t heartbeatIntervalMs;
+    uint32_t bootHostWaitMs;
+    uint8_t panelColorRed;
+    uint8_t panelColorGreen;
+    uint8_t panelColorBlue;
+    uint8_t reserved1;
+};
+
+struct LegacyStoredFirmwareConfigV10 {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t length;
+    uint32_t checksum;
+    LegacyPersistedFirmwareConfigV10 config;
+};
+
+PersistedFirmwareConfig migrate_persisted_config_v10(const LegacyPersistedFirmwareConfigV10 &legacy)
+{
+    PersistedFirmwareConfig config = {};
+    config.motionChannelCount = legacy.motionChannelCount;
+    config.activeMotionChannel = legacy.activeMotionChannel;
+    config.allowUnverifiedTmcMotion = legacy.allowUnverifiedTmcMotion;
+    config.reserved0 = legacy.reserved0;
+    memcpy(config.motionChannels, legacy.motionChannels, sizeof(config.motionChannels));
+    config.pins = legacy.pins;
+    config.loadCell.source = legacy.loadCell.source;
+    config.loadCell.connector = legacy.loadCell.connector;
+    config.loadCell.hx711ReleaseRate = legacy.loadCell.hx711ReleaseRate;
+    config.loadCell.hx711RiseRate = legacy.loadCell.hx711RiseRate;
+    config.loadCell.pins = legacy.loadCell.pins;
+    config.loadCell.threshold = legacy.loadCell.threshold;
+    config.loadCell.calibrationRaw = 0U;
+    config.loadCell.calibrationGrams = 0U;
+    config.loadCell.reserved0 = 0U;
+    config.stopDebounceCount = legacy.stopDebounceCount;
+    config.backoffSteps = legacy.backoffSteps;
+    config.stepIntervalUs = legacy.stepIntervalUs;
+    config.stepPulseWidthUs = legacy.stepPulseWidthUs;
+    config.tmcUartBitUs = legacy.tmcUartBitUs;
+    config.statusIntervalMs = legacy.statusIntervalMs;
+    config.heartbeatIntervalMs = legacy.heartbeatIntervalMs;
+    config.bootHostWaitMs = legacy.bootHostWaitMs;
+    config.panelColorRed = legacy.panelColorRed;
+    config.panelColorGreen = legacy.panelColorGreen;
+    config.panelColorBlue = legacy.panelColorBlue;
+    config.reserved1 = legacy.reserved1;
+    return config;
+}
 
 uint8_t axis_workspace_valid(const PersistedFirmwareConfig &config)
 {
@@ -376,9 +462,13 @@ PersistedFirmwareConfig make_default_persisted_config(void)
     config.pins.led = {(uint8_t)GpioPortId::E, 5U};
     config.loadCell.source = (uint8_t)LoadCellSourceKind::Simulation;
     config.loadCell.connector = (uint8_t)LoadCellConnectorKind::Custom;
+    config.loadCell.hx711ReleaseRate = 2U;
+    config.loadCell.hx711RiseRate = 4U;
     config.loadCell.pins.data = {0U, 0U};
     config.loadCell.pins.clock = {0U, 0U};
     config.loadCell.threshold = 1000U;
+    config.loadCell.calibrationRaw = 0U;
+    config.loadCell.calibrationGrams = 0U;
     config.stopDebounceCount = 3U;
     config.backoffSteps = 600U;
     config.stepIntervalUs = 250U;
@@ -444,7 +534,11 @@ uint8_t persisted_config_valid(const PersistedFirmwareConfig &config)
            pin_assignment_valid(config.pins.led) &&
                      (config.loadCell.source <= (uint8_t)LoadCellSourceKind::AnalogAdc) &&
                      (config.loadCell.connector <= (uint8_t)LoadCellConnectorKind::Skr2Tb) &&
+                     (config.loadCell.hx711ReleaseRate <= 8U) &&
+                     (config.loadCell.hx711RiseRate <= 8U) &&
                      (config.loadCell.threshold > 0U) &&
+                     (((config.loadCell.calibrationRaw == 0U) && (config.loadCell.calibrationGrams == 0U)) ||
+                      ((config.loadCell.calibrationRaw > 0U) && (config.loadCell.calibrationGrams > 0U))) &&
                      (((config.loadCell.source != (uint8_t)LoadCellSourceKind::AnalogAdc) ||
                          pin_assignment_valid(config.loadCell.pins.data))) &&
                      (((config.loadCell.source != (uint8_t)LoadCellSourceKind::Hx711) ||
@@ -505,11 +599,30 @@ int32_t axis_travel_max_um(const PersistedFirmwareConfig &config)
 
 uint8_t load_persisted_config(PersistedFirmwareConfig *config)
 {
-    const StoredFirmwareConfig *stored = (const StoredFirmwareConfig *)CONFIG_FLASH_ADDRESS;
+    const StoredFirmwareConfig *stored = (const StoredFirmwareConfig *)config_flash_storage_address();
     if (stored->magic != CONFIG_MAGIC)
     {
         return 0U;
     }
+
+    if ((stored->version == CONFIG_VERSION_V10) && (stored->length == sizeof(LegacyPersistedFirmwareConfigV10)))
+    {
+        const LegacyStoredFirmwareConfigV10 *legacy = (const LegacyStoredFirmwareConfigV10 *)config_flash_storage_address();
+        if (legacy->checksum != checksum32(&legacy->config, sizeof(legacy->config)))
+        {
+            return 0U;
+        }
+
+        PersistedFirmwareConfig migrated = migrate_persisted_config_v10(legacy->config);
+        if (persisted_config_valid(migrated) == 0U)
+        {
+            return 0U;
+        }
+
+        *config = migrated;
+        return 1U;
+    }
+
     if ((stored->version != CONFIG_VERSION) || (stored->length != sizeof(PersistedFirmwareConfig)))
     {
         return 0U;
@@ -553,7 +666,7 @@ uint8_t save_persisted_config(const PersistedFirmwareConfig &config)
 
     const uint32_t *words = (const uint32_t *)&stored;
     const uint32_t word_count = sizeof(stored) / sizeof(uint32_t);
-    uint32_t address = CONFIG_FLASH_ADDRESS;
+    uintptr_t address = config_flash_storage_address();
     for (uint32_t index = 0U; index < word_count; ++index)
     {
         if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, address, words[index]) != HAL_OK)
@@ -585,6 +698,46 @@ void emit_config_summary(const PersistedFirmwareConfig &config, const ConfigRunt
         (unsigned long)state.loadedFromFlash,
         (unsigned long)state.dirty,
         (unsigned long)state.requiresReboot);
+    if (len > 0)
+    {
+        usb_cdc_bridge_write(line, (uint16_t)len);
+    }
+
+    len = snprintf(
+        line,
+        sizeof(line),
+        "config loadcell.hx711_release_rate=%lu\r\n",
+        (unsigned long)(config.loadCell.hx711ReleaseRate == 0U ? 2U : config.loadCell.hx711ReleaseRate));
+    if (len > 0)
+    {
+        usb_cdc_bridge_write(line, (uint16_t)len);
+    }
+
+    len = snprintf(
+        line,
+        sizeof(line),
+        "config loadcell.hx711_rise_rate=%lu\r\n",
+        (unsigned long)(config.loadCell.hx711RiseRate == 0U ? 4U : config.loadCell.hx711RiseRate));
+    if (len > 0)
+    {
+        usb_cdc_bridge_write(line, (uint16_t)len);
+    }
+
+    len = snprintf(
+        line,
+        sizeof(line),
+        "config loadcell.calibration_raw=%lu\r\n",
+        (unsigned long)config.loadCell.calibrationRaw);
+    if (len > 0)
+    {
+        usb_cdc_bridge_write(line, (uint16_t)len);
+    }
+
+    len = snprintf(
+        line,
+        sizeof(line),
+        "config loadcell.calibration_grams=%u\r\n",
+        (unsigned int)config.loadCell.calibrationGrams);
     if (len > 0)
     {
         usb_cdc_bridge_write(line, (uint16_t)len);

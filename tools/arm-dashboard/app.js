@@ -69,7 +69,12 @@ const dom = {
   stepTotalValue: document.getElementById('stepTotalValue'),
   stepWindowValue: document.getElementById('stepWindowValue'),
   loadCellSourceValue: document.getElementById('loadCellSourceValue'),
+  loadCellPrecisionValue: document.getElementById('loadCellPrecisionValue'),
+  loadCellInstantValue: document.getElementById('loadCellInstantValue'),
   loadCellRawValue: document.getElementById('loadCellRawValue'),
+  loadCellRangeValue: document.getElementById('loadCellRangeValue'),
+  loadCellCalibrationValue: document.getElementById('loadCellCalibrationValue'),
+  loadCellNoiseFloorValue: document.getElementById('loadCellNoiseFloorValue'),
   loadCellThresholdValue: document.getElementById('loadCellThresholdValue'),
   loadCellPeakValue: document.getElementById('loadCellPeakValue'),
   loadCellTriggerValue: document.getElementById('loadCellTriggerValue'),
@@ -83,9 +88,20 @@ const dom = {
   configPanelColorValue: document.getElementById('configPanelColorValue'),
   configPanelSwatch: document.getElementById('configPanelSwatch'),
   loadCellConfigForm: document.getElementById('loadCellConfigForm'),
+  precisionConfigForm: document.getElementById('precisionConfigForm'),
   loadCellConnectorSelect: document.getElementById('loadCellConnectorSelect'),
   loadCellSourceSelect: document.getElementById('loadCellSourceSelect'),
   loadCellThresholdInput: document.getElementById('loadCellThresholdInput'),
+  loadCellHx711RiseRateInput: document.getElementById('loadCellHx711RiseRateInput'),
+  loadCellHx711ReleaseRateInput: document.getElementById('loadCellHx711ReleaseRateInput'),
+  loadCellPrecisionRangeInput: document.getElementById('loadCellPrecisionRangeInput'),
+  loadCellPrecisionZeroFloorInput: document.getElementById('loadCellPrecisionZeroFloorInput'),
+  loadCellPrecisionResolutionInput: document.getElementById('loadCellPrecisionResolutionInput'),
+  loadCellCalibrationGramsInput: document.getElementById('loadCellCalibrationGramsInput'),
+  loadCellCalibrationRawInput: document.getElementById('loadCellCalibrationRawInput'),
+  captureLoadCellCalibrationButton: document.getElementById('captureLoadCellCalibrationButton'),
+  applyLoadCellCalibrationButton: document.getElementById('applyLoadCellCalibrationButton'),
+  clearLoadCellCalibrationButton: document.getElementById('clearLoadCellCalibrationButton'),
   loadCellDataPinInput: document.getElementById('loadCellDataPinInput'),
   loadCellClockPinInput: document.getElementById('loadCellClockPinInput'),
   runtimeConfigForm: document.getElementById('runtimeConfigForm'),
@@ -142,9 +158,19 @@ const state = {
     raw: 0,
     threshold: 0,
     triggered: 0,
-    peak: 0
+    peak: 0,
+    instantGrams: 0,
+    stableGrams: 0,
+    peakGrams: 0
   },
   loadCellSamples: [],
+  precision: {
+    thresholdGrams: 100,
+    zeroFloorGrams: 1.5,
+    resolutionGrams: 0.25,
+    emaGrams: 0,
+    recentGrams: []
+  },
   simulatedCurve: {
     meta: null,
     samples: []
@@ -160,6 +186,10 @@ const state = {
       source: 'hx711',
       connector: 'custom',
       threshold: 1000,
+      hx711RiseRate: 4,
+      hx711ReleaseRate: 2,
+      calibrationRaw: 0,
+      calibrationGrams: 0,
       dataPin: 'PE4',
       clockPin: 'PE5'
     },
@@ -186,6 +216,7 @@ const VIEW_META = {
 };
 
 const systemThemeMedia = window.matchMedia('(prefers-color-scheme: dark)');
+const precisionStorageKey = 'skr2-arm-dashboard-precision';
 
 const STOP_SOURCE_LABELS = {
   0: 'None',
@@ -299,6 +330,131 @@ function parseSimTelemetryLine(line) {
   return result;
 }
 
+function roundToStep(value, step) {
+  if (!Number.isFinite(step) || step <= 0) {
+    return value;
+  }
+
+  return Math.round(value / step) * step;
+}
+
+function formatGrams(value) {
+  return `${value.toFixed(value >= 10 ? 1 : 2).replace(/\.00$/, '.0')} g`;
+}
+
+function activeCalibration() {
+  if (state.config.loadCell.calibrationRaw > 0 && state.config.loadCell.calibrationGrams > 0) {
+    return {
+      raw: state.config.loadCell.calibrationRaw,
+      grams: state.config.loadCell.calibrationGrams,
+      label: `${state.config.loadCell.calibrationGrams} g @ raw ${state.config.loadCell.calibrationRaw}`
+    };
+  }
+
+  return {
+    raw: Math.max(state.loadCell.threshold, 1),
+    grams: Math.max(state.precision.thresholdGrams, 1),
+    label: `Fallback ${state.precision.thresholdGrams} g @ threshold`
+  };
+}
+
+function computePrecisionLoadCell(raw, threshold) {
+  const calibration = activeCalibration();
+  const fullScaleGrams = Math.max(calibration.grams, 1);
+  const referenceRaw = Math.max(calibration.raw, 1);
+  const zeroFloorGrams = Math.max(state.precision.zeroFloorGrams, 0);
+  const resolutionGrams = Math.max(state.precision.resolutionGrams, 0.05);
+  const instantGrams = (raw / referenceRaw) * fullScaleGrams;
+
+  state.precision.recentGrams.push(instantGrams);
+  while (state.precision.recentGrams.length > 7) {
+    state.precision.recentGrams.shift();
+  }
+
+  const medianWindow = [...state.precision.recentGrams].sort((left, right) => left - right);
+  const medianGrams = medianWindow[Math.floor(medianWindow.length / 2)] ?? 0;
+  const previousStable = state.precision.emaGrams;
+  const blendedGrams = previousStable === 0
+    ? medianGrams
+    : (previousStable * 0.7) + (medianGrams * 0.3);
+
+  let stableGrams = blendedGrams;
+  if (medianGrams < (zeroFloorGrams * 1.15) && stableGrams < (zeroFloorGrams * 1.35)) {
+    stableGrams = 0;
+  }
+
+  stableGrams = Math.max(0, roundToStep(stableGrams, resolutionGrams));
+  state.precision.emaGrams = stableGrams;
+
+  return {
+    instantGrams,
+    stableGrams,
+    fullScaleGrams,
+    zeroFloorGrams
+  };
+}
+
+function loadPrecisionPreferences() {
+  try {
+    const stored = window.localStorage.getItem(precisionStorageKey);
+    if (!stored) {
+      return;
+    }
+
+    const parsed = JSON.parse(stored);
+    if (Number.isFinite(parsed.thresholdGrams) && parsed.thresholdGrams > 0) {
+      state.precision.thresholdGrams = parsed.thresholdGrams;
+    }
+    if (Number.isFinite(parsed.zeroFloorGrams) && parsed.zeroFloorGrams >= 0) {
+      state.precision.zeroFloorGrams = parsed.zeroFloorGrams;
+    }
+    if (Number.isFinite(parsed.resolutionGrams) && parsed.resolutionGrams > 0) {
+      state.precision.resolutionGrams = parsed.resolutionGrams;
+    }
+  } catch {
+    // ignore malformed local precision preferences
+  }
+}
+
+function savePrecisionPreferences() {
+  window.localStorage.setItem(precisionStorageKey, JSON.stringify({
+    thresholdGrams: state.precision.thresholdGrams,
+    zeroFloorGrams: state.precision.zeroFloorGrams,
+    resolutionGrams: state.precision.resolutionGrams
+  }));
+}
+
+function updatePrecisionInputs() {
+  dom.loadCellPrecisionRangeInput.value = String(state.precision.thresholdGrams);
+  dom.loadCellPrecisionZeroFloorInput.value = String(state.precision.zeroFloorGrams);
+  dom.loadCellPrecisionResolutionInput.value = String(state.precision.resolutionGrams);
+  dom.loadCellCalibrationGramsInput.value = String(state.config.loadCell.calibrationGrams || state.precision.thresholdGrams);
+  dom.loadCellCalibrationRawInput.value = String(state.config.loadCell.calibrationRaw || state.loadCell.raw || 0);
+}
+
+function applyPrecisionConfig() {
+  state.precision.thresholdGrams = Math.max(Number(dom.loadCellPrecisionRangeInput.value) || 100, 1);
+  state.precision.zeroFloorGrams = Math.max(Number(dom.loadCellPrecisionZeroFloorInput.value) || 0, 0);
+  state.precision.resolutionGrams = Math.max(Number(dom.loadCellPrecisionResolutionInput.value) || 0.25, 0.05);
+  state.precision.emaGrams = 0;
+  state.precision.recentGrams = [];
+  state.loadCell.peakGrams = 0;
+  savePrecisionPreferences();
+  updatePrecisionInputs();
+  updateLoadCellValues();
+  renderLoadCellChart();
+}
+
+async function applyLoadCellCalibration() {
+  const calibrationRaw = Math.max(Number(dom.loadCellCalibrationRawInput.value) || 0, 0);
+  const calibrationGrams = Math.max(Number(dom.loadCellCalibrationGramsInput.value) || 0, 0);
+  await runCommandSequence([
+    `set loadcell.calibration_raw ${calibrationRaw}`,
+    `set loadcell.calibration_grams ${calibrationGrams}`
+  ], 120);
+  await refreshConfigState();
+}
+
 function updateTelemetryCardValues() {
   const driver = state.telemetry.driver;
   const displayDriverValue = (value) => (Number.isFinite(value) ? String(value) : '--');
@@ -339,12 +495,17 @@ function updateTelemetryCardValues() {
 
 function updateLoadCellValues() {
   dom.loadCellSourceValue.textContent = state.loadCell.source;
+  dom.loadCellPrecisionValue.textContent = formatGrams(state.loadCell.stableGrams);
+  dom.loadCellInstantValue.textContent = formatGrams(state.loadCell.instantGrams);
   dom.loadCellRawValue.textContent = String(state.loadCell.raw);
+  dom.loadCellRangeValue.textContent = formatGrams(state.precision.thresholdGrams);
+  dom.loadCellCalibrationValue.textContent = activeCalibration().label;
+  dom.loadCellNoiseFloorValue.textContent = formatGrams(state.precision.zeroFloorGrams);
   dom.loadCellThresholdValue.textContent = String(state.loadCell.threshold);
-  dom.loadCellPeakValue.textContent = String(state.loadCell.peak);
+  dom.loadCellPeakValue.textContent = formatGrams(state.loadCell.peakGrams);
   dom.loadCellTriggerValue.textContent = state.loadCell.triggered ? 'Triggered' : 'Clear';
   dom.loadCellTriggerValue.classList.toggle('is-triggered', Boolean(state.loadCell.triggered));
-  dom.loadCellSummary.textContent = `Live ${state.loadCell.source} samples. Raw ${state.loadCell.raw}, threshold ${state.loadCell.threshold}, peak ${state.loadCell.peak}, trigger ${state.loadCell.triggered ? 'active' : 'clear'}.`;
+  dom.loadCellSummary.textContent = `Calibration ${activeCalibration().label}. Stable ${formatGrams(state.loadCell.stableGrams)}, instant ${formatGrams(state.loadCell.instantGrams)}, raw ${state.loadCell.raw}, trigger ${state.loadCell.triggered ? 'active' : 'clear'}.`;
 }
 
 function updateConfigValues() {
@@ -359,7 +520,7 @@ function updateConfigValues() {
   dom.configLoadCellProfileValue.textContent = state.config.loadCell.connector.toUpperCase();
   dom.configLoadCellSourceValue.textContent = `Source ${state.config.loadCell.source.toUpperCase()}`;
   dom.configLoadCellPinsValue.textContent = `${state.config.loadCell.dataPin} / ${state.config.loadCell.clockPin}`;
-  dom.configLoadCellThresholdValue.textContent = `Threshold ${state.config.loadCell.threshold}`;
+  dom.configLoadCellThresholdValue.textContent = `Threshold ${state.config.loadCell.threshold} / Rise ${state.config.loadCell.hx711RiseRate} / Release ${state.config.loadCell.hx711ReleaseRate} / Cal ${state.config.loadCell.calibrationGrams || 0} g`;
   dom.configAllowUnverifiedValue.textContent = allowText;
   dom.configPanelColorValue.textContent = panelRgbText;
   dom.configPanelSwatch.style.background = `rgb(${state.config.panelColor.red}, ${state.config.panelColor.green}, ${state.config.panelColor.blue})`;
@@ -367,6 +528,10 @@ function updateConfigValues() {
   dom.loadCellConnectorSelect.value = state.config.loadCell.connector;
   dom.loadCellSourceSelect.value = state.config.loadCell.source;
   dom.loadCellThresholdInput.value = String(state.config.loadCell.threshold);
+  dom.loadCellHx711RiseRateInput.value = String(state.config.loadCell.hx711RiseRate);
+  dom.loadCellHx711ReleaseRateInput.value = String(state.config.loadCell.hx711ReleaseRate);
+  dom.loadCellCalibrationGramsInput.value = String(state.config.loadCell.calibrationGrams || state.precision.thresholdGrams);
+  dom.loadCellCalibrationRawInput.value = String(state.config.loadCell.calibrationRaw || 0);
   dom.loadCellDataPinInput.value = state.config.loadCell.dataPin;
   dom.loadCellClockPinInput.value = state.config.loadCell.clockPin;
   dom.allowUnverifiedMotionToggle.checked = Boolean(state.config.allowUnverifiedMotion);
@@ -382,6 +547,8 @@ function updateLoadCellConfigUi() {
   const isHx711 = dom.loadCellSourceSelect.value === 'hx711';
 
   dom.loadCellSourceSelect.disabled = !isCustom;
+  dom.loadCellHx711RiseRateInput.disabled = !isHx711;
+  dom.loadCellHx711ReleaseRateInput.disabled = !isHx711;
   dom.loadCellDataPinInput.disabled = !isCustom;
   dom.loadCellClockPinInput.disabled = !isCustom || !isHx711;
 }
@@ -407,6 +574,50 @@ function parseConfigLine(line) {
     state.config.loadCell.threshold = Number(match[3]);
     state.config.loadCell.dataPin = match[4].toUpperCase();
     state.config.loadCell.clockPin = match[5].toUpperCase();
+    updateConfigValues();
+    return true;
+  }
+
+  if (line.startsWith('config loadcell.hx711_release_rate=')) {
+    const match = line.match(/^config loadcell\.hx711_release_rate=(\d+)$/);
+    if (!match) {
+      return false;
+    }
+
+    state.config.loadCell.hx711ReleaseRate = Number(match[1]);
+    updateConfigValues();
+    return true;
+  }
+
+  if (line.startsWith('config loadcell.hx711_rise_rate=')) {
+    const match = line.match(/^config loadcell\.hx711_rise_rate=(\d+)$/);
+    if (!match) {
+      return false;
+    }
+
+    state.config.loadCell.hx711RiseRate = Number(match[1]);
+    updateConfigValues();
+    return true;
+  }
+
+  if (line.startsWith('config loadcell.calibration_raw=')) {
+    const match = line.match(/^config loadcell\.calibration_raw=(\d+)$/);
+    if (!match) {
+      return false;
+    }
+
+    state.config.loadCell.calibrationRaw = Number(match[1]);
+    updateConfigValues();
+    return true;
+  }
+
+  if (line.startsWith('config loadcell.calibration_grams=')) {
+    const match = line.match(/^config loadcell\.calibration_grams=(\d+)$/);
+    if (!match) {
+      return false;
+    }
+
+    state.config.loadCell.calibrationGrams = Number(match[1]);
     updateConfigValues();
     return true;
   }
@@ -446,11 +657,14 @@ function pushChartSample(force, position) {
 }
 
 function pushLoadCellSample(raw, threshold, triggered) {
+  const precision = computePrecisionLoadCell(raw, threshold);
   state.loadCellSamples.push({
     at: Date.now(),
     raw,
     threshold,
-    triggered
+    triggered,
+    instantGrams: precision.instantGrams,
+    stableGrams: precision.stableGrams
   });
 
   while (state.loadCellSamples.length > 360) {
@@ -461,6 +675,9 @@ function pushLoadCellSample(raw, threshold, triggered) {
   state.loadCell.threshold = threshold;
   state.loadCell.triggered = triggered;
   state.loadCell.peak = Math.max(state.loadCell.peak, raw);
+  state.loadCell.instantGrams = precision.instantGrams;
+  state.loadCell.stableGrams = precision.stableGrams;
+  state.loadCell.peakGrams = Math.max(state.loadCell.peakGrams, precision.stableGrams);
   updateLoadCellValues();
   renderLoadCellChart();
 }
@@ -470,7 +687,7 @@ function formatCurveSummary(meta) {
     return 'Run test\\run_simulated_probe_workflow.ps1, then load the exported curve here to preview the simulated switch/load-cell response before hardware hookup.';
   }
 
-  return `Threshold ${meta.threshold}, press target ${meta.pressTarget}, contact ${meta.contactPosition}, cycles ${meta.cycleCount}, hits ${meta.loadCellHits}, max force ${meta.maxForce}.`;
+  return `Threshold ${meta.threshold}, contact raw ${meta.contactDetectRaw ?? 'n/a'}, press target ${meta.pressTarget}, contact ${meta.contactPosition}, cycles ${meta.cycleCount}, hits ${meta.loadCellHits}, max force ${meta.maxForce}.`;
 }
 
 function renderChart() {
@@ -574,18 +791,19 @@ function renderLoadCellChart() {
   if (samples.length < 2) {
     ctx.fillStyle = '#6a5a4d';
     ctx.font = '16px Bahnschrift';
-    ctx.fillText('Waiting for live load-cell samples…', 24, 42);
+    ctx.fillText('Waiting for precision load-cell samples…', 24, 42);
     return;
   }
 
-  const rawValues = samples.map((sample) => sample.raw);
-  const thresholdValues = samples.map((sample) => sample.threshold);
-  const yMin = Math.min(...rawValues, ...thresholdValues, 0);
-  const yMax = Math.max(...rawValues, ...thresholdValues, 1);
+  const stableValues = samples.map((sample) => sample.stableGrams);
+  const instantValues = samples.map((sample) => sample.instantGrams);
+  const thresholdValues = samples.map(() => state.precision.thresholdGrams);
+  const yMin = 0;
+  const yMax = Math.max(...stableValues, ...instantValues, ...thresholdValues, 1);
   const xAt = (index) => left + (chartWidth * index) / Math.max(samples.length - 1, 1);
   const yAt = (value) => top + chartHeight - ((value - yMin) / Math.max(yMax - yMin, 1)) * chartHeight;
 
-  const latestThreshold = samples[samples.length - 1]?.threshold ?? 0;
+  const latestThreshold = state.precision.thresholdGrams;
   const thresholdY = yAt(latestThreshold);
   ctx.setLineDash([6, 4]);
   ctx.strokeStyle = 'rgba(179, 76, 49, 0.9)';
@@ -612,12 +830,26 @@ function renderLoadCellChart() {
     }
   });
 
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(100, 116, 139, 0.55)';
+  ctx.beginPath();
+  samples.forEach((sample, index) => {
+    const x = xAt(index);
+    const y = yAt(sample.instantGrams);
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  });
+  ctx.stroke();
+
   ctx.lineWidth = 2.5;
   ctx.strokeStyle = '#1c8b7d';
   ctx.beginPath();
   samples.forEach((sample, index) => {
     const x = xAt(index);
-    const y = yAt(sample.raw);
+    const y = yAt(sample.stableGrams);
     if (index === 0) {
       ctx.moveTo(x, y);
     } else {
@@ -627,20 +859,20 @@ function renderLoadCellChart() {
   ctx.stroke();
 
   ctx.fillStyle = '#1c8b7d';
-  samples.filter((sample) => sample.triggered).forEach((sample, index) => {
+  samples.filter((sample) => sample.triggered).forEach((sample) => {
     const sampleIndex = samples.indexOf(sample);
     ctx.beginPath();
-    ctx.arc(xAt(sampleIndex), yAt(sample.raw), 3, 0, Math.PI * 2);
+    ctx.arc(xAt(sampleIndex), yAt(sample.stableGrams), 3, 0, Math.PI * 2);
     ctx.fill();
   });
 
   ctx.fillStyle = '#6a5a4d';
   ctx.font = '13px Bahnschrift';
-  ctx.fillText(`Raw ${yMin}..${yMax}`, left, height - 12);
+  ctx.fillText(`Stable ${yMin.toFixed(0)}..${yMax.toFixed(1)} g`, left, height - 12);
   ctx.fillStyle = '#b34c31';
-  ctx.fillText(`Threshold ${latestThreshold}`, 220, height - 12);
+  ctx.fillText(`Threshold ${latestThreshold.toFixed(0)} g`, 220, height - 12);
   ctx.fillStyle = '#1c8b7d';
-  ctx.fillText(`Peak ${state.loadCell.peak}`, 390, height - 12);
+  ctx.fillText(`Peak ${state.loadCell.peakGrams.toFixed(1)} g`, 390, height - 12);
 }
 
 function renderResponseCurve() {
@@ -648,7 +880,6 @@ function renderResponseCurve() {
   const ctx = canvas.getContext('2d');
   const width = canvas.width;
   const height = canvas.height;
-  ctx.clearRect(0, 0, width, height);
 
   ctx.fillStyle = '#fefaf4';
   ctx.fillRect(0, 0, width, height);
@@ -679,7 +910,7 @@ function renderResponseCurve() {
     return;
   }
 
-  const positions = samples.map((sample) => sample.position);
+  const positions = samples.map((sample) => Number.isFinite(sample.normalizedPosition) ? sample.normalizedPosition : sample.position);
   const forces = samples.map((sample) => sample.force);
   const xMin = Math.min(...positions, 0);
   const xMax = Math.max(...positions, 1);
@@ -703,7 +934,8 @@ function renderResponseCurve() {
   }
 
   if (meta && Number.isFinite(meta.contactPosition)) {
-    const contactX = xAt(meta.contactPosition);
+    const contactTravel = (meta.pressTarget > 0) ? (meta.contactPosition / meta.pressTarget) : meta.contactPosition;
+    const contactX = xAt(contactTravel);
     ctx.setLineDash([3, 4]);
     ctx.strokeStyle = 'rgba(28, 139, 125, 0.6)';
     ctx.beginPath();
@@ -717,7 +949,8 @@ function renderResponseCurve() {
   ctx.strokeStyle = '#1c8b7d';
   ctx.beginPath();
   samples.forEach((sample, index) => {
-    const x = xAt(sample.position);
+    const position = Number.isFinite(sample.normalizedPosition) ? sample.normalizedPosition : sample.position;
+    const x = xAt(position);
     const y = yAt(sample.force);
     if (index === 0) {
       ctx.moveTo(x, y);
@@ -730,13 +963,22 @@ function renderResponseCurve() {
   ctx.fillStyle = '#b34c31';
   samples.filter((sample) => sample.load).forEach((sample) => {
     ctx.beginPath();
-    ctx.arc(xAt(sample.position), yAt(sample.force), 3.5, 0, Math.PI * 2);
+    const position = Number.isFinite(sample.normalizedPosition) ? sample.normalizedPosition : sample.position;
+    ctx.arc(xAt(position), yAt(sample.force), 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  ctx.fillStyle = '#1c8b7d';
+  samples.filter((sample) => sample.contact && !sample.load).forEach((sample) => {
+    ctx.beginPath();
+    const position = Number.isFinite(sample.normalizedPosition) ? sample.normalizedPosition : sample.position;
+    ctx.arc(xAt(position), yAt(sample.force), 2.5, 0, Math.PI * 2);
     ctx.fill();
   });
 
   ctx.fillStyle = '#6a5a4d';
   ctx.font = '13px Bahnschrift';
-  ctx.fillText(`Position ${xMin}..${xMax}`, left, height - 12);
+  ctx.fillText(`Travel ${(xMin * 100).toFixed(0)}..${(xMax * 100).toFixed(0)}%`, left, height - 12);
   ctx.fillText(`Force ${yMin}..${yMax}`, 220, height - 12);
 }
 
@@ -1006,6 +1248,8 @@ async function applyLoadCellConfig() {
   const connector = dom.loadCellConnectorSelect.value.trim().toLowerCase();
   const source = dom.loadCellSourceSelect.value.trim().toLowerCase();
   const threshold = Math.max(Number(dom.loadCellThresholdInput.value) || 1, 1);
+  const hx711RiseRate = Math.min(Math.max(Number(dom.loadCellHx711RiseRateInput.value) || 0, 0), 8);
+  const hx711ReleaseRate = Math.min(Math.max(Number(dom.loadCellHx711ReleaseRateInput.value) || 0, 0), 8);
   const dataPin = dom.loadCellDataPinInput.value.trim().toUpperCase();
   const clockPin = dom.loadCellClockPinInput.value.trim().toUpperCase();
   const commands = [];
@@ -1021,6 +1265,10 @@ async function applyLoadCellConfig() {
   }
 
   commands.push(`set loadcell.threshold ${threshold}`);
+  if ((connector !== 'custom') || (source === 'hx711')) {
+    commands.push(`set loadcell.hx711_rise_rate ${hx711RiseRate}`);
+    commands.push(`set loadcell.hx711_release_rate ${hx711ReleaseRate}`);
+  }
   await runCommandSequence(commands, 120);
   await refreshConfigState();
 }
@@ -1140,6 +1388,9 @@ function bindUi() {
   dom.clearLoadCellChartButton.addEventListener('click', () => {
     state.loadCellSamples = [];
     state.loadCell.peak = state.loadCell.raw;
+    state.loadCell.peakGrams = state.loadCell.stableGrams;
+    state.precision.emaGrams = 0;
+    state.precision.recentGrams = [];
     updateLoadCellValues();
     renderLoadCellChart();
   });
@@ -1224,6 +1475,37 @@ function bindUi() {
     }
   });
 
+  dom.precisionConfigForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    applyPrecisionConfig();
+    logLine('sys', `Precision view set to ${state.precision.thresholdGrams} g full scale, ${state.precision.zeroFloorGrams} g zero floor, ${state.precision.resolutionGrams} g resolution.`);
+  });
+
+  dom.captureLoadCellCalibrationButton.addEventListener('click', () => {
+    dom.loadCellCalibrationRawInput.value = String(state.loadCell.raw);
+    logLine('sys', `Captured calibration raw ${state.loadCell.raw}.`);
+  });
+
+  dom.applyLoadCellCalibrationButton.addEventListener('click', async () => {
+    try {
+      await applyLoadCellCalibration();
+      logLine('sys', `Board calibration set to ${dom.loadCellCalibrationGramsInput.value} g at raw ${dom.loadCellCalibrationRawInput.value}.`);
+    } catch (error) {
+      logLine('err', error.message || String(error));
+    }
+  });
+
+  dom.clearLoadCellCalibrationButton.addEventListener('click', async () => {
+    dom.loadCellCalibrationRawInput.value = '0';
+    dom.loadCellCalibrationGramsInput.value = String(state.precision.thresholdGrams);
+    try {
+      await applyLoadCellCalibration();
+      logLine('sys', 'Board calibration cleared.');
+    } catch (error) {
+      logLine('err', error.message || String(error));
+    }
+  });
+
   dom.runtimeConfigForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     try {
@@ -1254,8 +1536,10 @@ function bindUi() {
 }
 
 bindUi();
+loadPrecisionPreferences();
 updateConnectionUi();
 updateTelemetryCardValues();
+updatePrecisionInputs();
 updateLoadCellValues();
 updateConfigValues();
 setActiveView(state.activeView);

@@ -395,11 +395,19 @@ Typical SWD connections:
 
 For the board-relative hookup guide and signal map, see `docs/STLINK_HOOKUP.md`.
 
-Direct upload with PlatformIO:
+Preferred repo entrypoints:
 
 ```powershell
 Set-Location "c:\git\BTT SKR2 Testing"
-& "C:\Users\jd\.platformio\penv\Scripts\platformio.exe" run -e skr2_f429_usb -t upload
+& ".\products\skr2-f429\build-app.ps1"
+& ".\products\skr2-f429\flash-app.ps1" -EnterBootloader -FirmwarePath ".\.pio\build\skr2_f429_usb\firmware.bin" -SkipBuild
+```
+
+ST-Link application flashing is kept for diagnostics and recovery only:
+
+```powershell
+Set-Location "c:\git\BTT SKR2 Testing"
+& ".\products\skr2-f429\recover-app.ps1"
 ```
 
 End-to-end hardware validation over ST-Link plus USB CDC:
@@ -431,10 +439,10 @@ Once the resident CDC bootloader is installed, normal application reflashing can
 
 ```powershell
 Set-Location "c:\git\BTT SKR2 Testing"
-& ".\tools\flash-over-cdc.ps1" -EnterBootloader -FirmwarePath ".\.pio\build\skr2_f429_usb\firmware.bin"
+& ".\products\skr2-f429\flash-app.ps1" -EnterBootloader -FirmwarePath ".\.pio\build\skr2_f429_usb\firmware.bin"
 ```
 
-The uploader can now auto-discover the resident bootloader port. If the board is currently running the app, add `-EnterBootloader` and it will issue the mode switch first.
+This is the preferred app flashing path. The uploader can auto-discover the resident bootloader port. If the board is currently running the app, add `-EnterBootloader` and it will issue the mode switch first.
 
 Mode transitions over USB:
 
@@ -522,6 +530,7 @@ The host test runner compiles and executes:
 
 - bootloader protocol unit tests
 - protocol unit tests
+- runtime config unit tests covering defaults, validation, persistence round-trips, migration, and config-summary telemetry
 - domain unit tests
 - integration tests covering parser-to-domain end-to-end behavior for homing, move aliases, stop handling, hold/enable semantics, cycle routines, and motion fault paths
 

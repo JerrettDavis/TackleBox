@@ -1,6 +1,7 @@
 #include "app_display.h"
 
 #include "app_board.h"
+#include "load_cell.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -517,22 +518,6 @@ static const char *motion_state_label(const keyswitch::MotionState &state)
     }
 }
 
-static uint32_t load_display_full_scale_raw(const PersistedFirmwareConfig &config)
-{
-    uint32_t full_scale_raw = config.loadCell.threshold;
-    if (full_scale_raw == 0U)
-    {
-        return 4000U;
-    }
-
-    if (full_scale_raw <= (UINT32_MAX / 4U))
-    {
-        full_scale_raw *= 4U;
-    }
-
-    return (full_scale_raw < 4000U) ? 4000U : full_scale_raw;
-}
-
 static uint32_t update_load_display_relative_raw(uint32_t raw, const PersistedFirmwareConfig &config)
 {
     const uint32_t settle_window = ((config.loadCell.threshold > 0U) ? (config.loadCell.threshold / 8U) : 0U) + 16U;
@@ -557,13 +542,7 @@ static uint32_t update_load_display_relative_raw(uint32_t raw, const PersistedFi
 
 static uint32_t load_display_estimated_grams(uint32_t relative_raw, const PersistedFirmwareConfig &config)
 {
-    const uint32_t full_scale_raw = load_display_full_scale_raw(config);
-    uint32_t grams = (relative_raw * 100U) / full_scale_raw;
-    if (((relative_raw % full_scale_raw) * 2U) >= full_scale_raw)
-    {
-        ++grams;
-    }
-    return (grams > 199U) ? 199U : grams;
+    return load_cell_calibrated_grams(relative_raw, config.loadCell);
 }
 
 static void load_graph_push_sample(uint32_t estimated_grams)

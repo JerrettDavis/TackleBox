@@ -476,6 +476,46 @@ static void emit_indexed_channel_summary(const PersistedFirmwareConfig &config, 
     len = snprintf(
         line,
         sizeof(line),
+        "config loadcell.hx711_release_rate=%lu\r\n",
+        (unsigned long)(config.loadCell.hx711ReleaseRate == 0U ? 2U : config.loadCell.hx711ReleaseRate));
+    if (len > 0)
+    {
+        usb_cdc_bridge_write(line, (uint16_t)len);
+    }
+
+    len = snprintf(
+        line,
+        sizeof(line),
+        "config loadcell.hx711_rise_rate=%lu\r\n",
+        (unsigned long)(config.loadCell.hx711RiseRate == 0U ? 4U : config.loadCell.hx711RiseRate));
+    if (len > 0)
+    {
+        usb_cdc_bridge_write(line, (uint16_t)len);
+    }
+
+    len = snprintf(
+        line,
+        sizeof(line),
+        "config loadcell.calibration_raw=%lu\r\n",
+        (unsigned long)config.loadCell.calibrationRaw);
+    if (len > 0)
+    {
+        usb_cdc_bridge_write(line, (uint16_t)len);
+    }
+
+    len = snprintf(
+        line,
+        sizeof(line),
+        "config loadcell.calibration_grams=%u\r\n",
+        (unsigned int)config.loadCell.calibrationGrams);
+    if (len > 0)
+    {
+        usb_cdc_bridge_write(line, (uint16_t)len);
+    }
+
+    len = snprintf(
+        line,
+        sizeof(line),
         "config inspect_channel=%lu channels.count=%lu channels.active=%lu\r\n",
         (unsigned long)index,
         (unsigned long)config.motionChannelCount,
@@ -874,8 +914,15 @@ static uint32_t feedrate_mm_per_min_from_step_interval_us(const PersistedFirmwar
 static uint32_t active_step_interval_us_for_state(const PersistedFirmwareConfig &config, const keyswitch::MotionState &motion_state)
 {
     const MotionChannelConfig &channel = active_motion_channel(config);
+    const uint8_t use_fine_probe_feedrate =
+        (((motion_state.homingState == keyswitch::HomingState::CycleToPress) || (motion_state.homingState == keyswitch::HomingState::CycleToHome)) &&
+         (motion_state.probeContactActive != 0U))
+            ? 1U
+            : 0U;
     const uint32_t feedrate_mm_per_min =
-        ((motion_state.homingState == keyswitch::HomingState::Seek) || (motion_state.homingState == keyswitch::HomingState::Backoff))
+        ((motion_state.homingState == keyswitch::HomingState::Seek) ||
+         (motion_state.homingState == keyswitch::HomingState::Backoff) ||
+         (use_fine_probe_feedrate != 0U))
             ? channel.homeFeedrateMmPerMin
             : channel.moveFeedrateMmPerMin;
     return step_interval_us_from_feedrate_mm_per_min(config, feedrate_mm_per_min);
@@ -1113,6 +1160,7 @@ static keyswitch::MotionConfig make_motion_config(const PersistedFirmwareConfig 
     const MotionChannelConfig &channel = active_motion_channel(config);
     keyswitch::MotionConfig motion_config = {};
     motion_config.seekStepLimit = axis_steps_from_um(config, channel.travelLimitUm);
+    motion_config.probeContactThresholdRaw = (config.loadCell.threshold > 0U) ? ((config.loadCell.threshold / 8U) + 1U) : 1U;
     motion_config.minPosition = axis_steps_from_signed_um(config, channel.travelMinUm);
     motion_config.maxPosition = axis_steps_from_signed_um(config, axis_travel_max_um(config));
     motion_config.debounceCount = config.stopDebounceCount;
@@ -1370,6 +1418,42 @@ static ApplyConfigResult apply_config_key_value(
         {
             load_cell_apply_config(&g_load_cell, config->loadCell);
         }
+    }
+    else if (same_text_case_sensitive(key, "LOADCELL.HX711_RELEASE_RATE") && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 <= 8U))
+    {
+        config->loadCell.hx711ReleaseRate = (uint8_t)parsed_u32;
+        result.accepted = 1U;
+        if (apply_live != 0U)
+        {
+            load_cell_apply_config(&g_load_cell, config->loadCell);
+        }
+    }
+    else if (same_text_case_sensitive(key, "LOADCELL.HX711_RISE_RATE") && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 <= 8U))
+    {
+        config->loadCell.hx711RiseRate = (uint8_t)parsed_u32;
+        result.accepted = 1U;
+        if (apply_live != 0U)
+        {
+            load_cell_apply_config(&g_load_cell, config->loadCell);
+        }
+    }
+    else if (same_text_case_sensitive(key, "LOADCELL.CALIBRATION_RAW") && parse_u32_cstr(value, &parsed_u32))
+    {
+        config->loadCell.calibrationRaw = parsed_u32;
+        if (parsed_u32 == 0U)
+        {
+            config->loadCell.calibrationGrams = 0U;
+        }
+        result.accepted = 1U;
+    }
+    else if (same_text_case_sensitive(key, "LOADCELL.CALIBRATION_GRAMS") && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 <= 2000U))
+    {
+        config->loadCell.calibrationGrams = (uint16_t)parsed_u32;
+        if (parsed_u32 == 0U)
+        {
+            config->loadCell.calibrationRaw = 0U;
+        }
+        result.accepted = 1U;
     }
     else if (same_text_case_sensitive(key, "MOTION.SEEK_LIMIT_STEPS") && parse_u32_cstr(value, &parsed_u32) && (parsed_u32 > 0U))
     {
@@ -1675,7 +1759,7 @@ static void emit_status_line(
     int len = snprintf(
         line,
         sizeof(line),
-        "diag0=%lu xstop=%lu diag2=%lu pressed=%lu conf=%lu load=%lu mech=%lu stall=%lu source=%lu force=%lu state=%lu homed=%lu hold=%lu pos=%ld target=%ld press=%ld cycles=%lu done=%lu backoff=%lu seek=%lu fault=%lu ui_click=%lu ui_a=%lu ui_b=%lu loop_last_us=%lu loop_max_us=%lu steps_total=%lu steps_hb=%lu steps_burst=%u tmc_sync=%u\r\n",
+        "diag0=%lu xstop=%lu diag2=%lu pressed=%lu conf=%lu load=%lu mech=%lu stall=%lu source=%lu force=%lu state=%lu homed=%lu hold=%lu pos=%ld target=%ld press=%ld contact_pos=%ld cycles=%lu done=%lu probe=%lu backoff=%lu seek=%lu fault=%lu ui_click=%lu ui_a=%lu ui_b=%lu loop_last_us=%lu loop_max_us=%lu steps_total=%lu steps_hb=%lu steps_burst=%u tmc_sync=%u\r\n",
         (unsigned long)inputs.rawDiag0,
         (unsigned long)inputs.rawXStop,
         (unsigned long)inputs.rawDiag2,
@@ -1692,8 +1776,10 @@ static void emit_status_line(
         (long)state.currentPosition,
         (long)state.targetPosition,
         (long)state.pressTargetPosition,
+        (long)state.probeContactPosition,
         (unsigned long)state.cycleCountRemaining,
         (unsigned long)state.completedCycles,
+        (unsigned long)state.probeContactActive,
         (unsigned long)state.backoffStepsRemaining,
         (unsigned long)state.seekSteps,
         (unsigned long)state.faultLatch,

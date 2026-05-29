@@ -35,7 +35,8 @@
           <button type="button" class="chip-button command-chip" data-command="safety">Safety</button>
           <button type="button" class="chip-button command-chip" data-command="driver">Driver</button>
           <button type="button" class="chip-button command-chip" data-command="config">Config</button>
-          <button type="button" class="secondary-button command-chip" data-command="home">Home</button>
+          <button type="button" class="secondary-button command-chip" data-command="home" title="Run the firmware homing seek routine">Seek Home</button>
+          <button type="button" class="secondary-button command-chip" data-command="g0 x0" title="Move to the zero position using the current coordinate system">Go Zero</button>
           <button type="button" class="secondary-button command-chip" data-command="tare">Tare</button>
           <button type="button" class="secondary-button command-chip" data-command="hold on">Hold On</button>
           <button type="button" class="secondary-button command-chip" data-command="hold off">Hold Off</button>
@@ -200,15 +201,35 @@
               <strong id="loadCellSourceValue" class="load-cell-chip-value">--</strong>
             </article>
             <article class="load-cell-chip">
+              <span class="load-cell-chip-label">Stable Weight</span>
+              <strong id="loadCellPrecisionValue" class="load-cell-chip-value">0.0 g</strong>
+            </article>
+            <article class="load-cell-chip">
+              <span class="load-cell-chip-label">Instant Weight</span>
+              <strong id="loadCellInstantValue" class="load-cell-chip-value">0.0 g</strong>
+            </article>
+            <article class="load-cell-chip">
               <span class="load-cell-chip-label">Current Raw</span>
               <strong id="loadCellRawValue" class="load-cell-chip-value">0</strong>
             </article>
             <article class="load-cell-chip">
-              <span class="load-cell-chip-label">Threshold</span>
+              <span class="load-cell-chip-label">Scale Range</span>
+              <strong id="loadCellRangeValue" class="load-cell-chip-value">100 g</strong>
+            </article>
+            <article class="load-cell-chip">
+              <span class="load-cell-chip-label">Calibration</span>
+              <strong id="loadCellCalibrationValue" class="load-cell-chip-value">Uncalibrated</strong>
+            </article>
+            <article class="load-cell-chip">
+              <span class="load-cell-chip-label">Noise Floor</span>
+              <strong id="loadCellNoiseFloorValue" class="load-cell-chip-value">1.5 g</strong>
+            </article>
+            <article class="load-cell-chip">
+              <span class="load-cell-chip-label">Trigger Raw</span>
               <strong id="loadCellThresholdValue" class="load-cell-chip-value">0</strong>
             </article>
             <article class="load-cell-chip">
-              <span class="load-cell-chip-label">Peak</span>
+              <span class="load-cell-chip-label">Peak Weight</span>
               <strong id="loadCellPeakValue" class="load-cell-chip-value">0</strong>
             </article>
             <article class="load-cell-chip">
@@ -216,6 +237,39 @@
               <strong id="loadCellTriggerValue" class="load-cell-chip-value">Clear</strong>
             </article>
           </div>
+          <form id="precisionConfigForm" class="stack-form precision-config-form">
+            <h3 class="setup-section-title">Precision View</h3>
+            <div class="inline-form-row triple-input-row">
+              <label>
+                Fallback range (g)
+                <input id="loadCellPrecisionRangeInput" type="number" min="1" step="1" value="100">
+              </label>
+              <label>
+                Zero floor (g)
+                <input id="loadCellPrecisionZeroFloorInput" type="number" min="0" step="0.1" value="1.5">
+              </label>
+              <label>
+                Resolution (g)
+                <input id="loadCellPrecisionResolutionInput" type="number" min="0.05" step="0.05" value="0.25">
+              </label>
+            </div>
+            <div class="inline-form-row triple-input-row">
+              <label>
+                Known mass (g)
+                <input id="loadCellCalibrationGramsInput" type="number" min="1" max="2000" step="1" value="100">
+              </label>
+              <label>
+                Captured raw
+                <input id="loadCellCalibrationRawInput" type="number" min="0" step="1" value="0" readonly>
+              </label>
+              <button id="captureLoadCellCalibrationButton" type="button" class="chip-button">Capture Current Raw</button>
+            </div>
+            <div class="inline-form-row precision-action-row">
+              <button id="applyLoadCellCalibrationButton" type="button" class="secondary-button">Apply Board Calibration</button>
+              <button id="clearLoadCellCalibrationButton" type="button" class="chip-button">Clear Calibration</button>
+            </div>
+            <button type="submit" class="secondary-button">Apply Precision View</button>
+          </form>
           <canvas id="loadCellChart" width="960" height="320" aria-label="Live load cell raw sample chart"></canvas>
         </section>
         </section>
@@ -287,6 +341,14 @@
                 <input id="loadCellThresholdInput" type="number" min="1" step="1" value="1000">
               </label>
               <label>
+                HX711 rise rate
+                <input id="loadCellHx711RiseRateInput" type="number" min="0" max="8" step="1" value="4">
+              </label>
+              <label>
+                HX711 release rate
+                <input id="loadCellHx711ReleaseRateInput" type="number" min="0" max="8" step="1" value="2">
+              </label>
+              <label>
                 Data pin
                 <input id="loadCellDataPinInput" type="text" value="PE4" placeholder="PE4">
               </label>
@@ -320,7 +382,8 @@
             <h2>Motion Controls</h2>
           </div>
           <div class="button-grid">
-            <button data-command="home" class="primary-button command-chip">Home</button>
+            <button data-command="home" class="primary-button command-chip" title="Run the firmware homing seek routine">Seek Home</button>
+            <button data-command="g0 x0" class="secondary-button command-chip" title="Move to the zero position using the current coordinate system">Go Zero</button>
             <button data-command="backoff" class="secondary-button command-chip">Backoff</button>
             <button data-command="stop" class="danger-button command-chip">Stop</button>
             <button data-command="enable" class="secondary-button command-chip">Enable</button>

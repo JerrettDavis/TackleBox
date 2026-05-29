@@ -9,6 +9,7 @@ keyswitch::MotionConfig make_config()
 {
     keyswitch::MotionConfig config = {};
     config.seekStepLimit = 10U;
+    config.probeContactThresholdRaw = 100U;
     config.minPosition = 0;
     config.maxPosition = 10;
     config.debounceCount = 3U;
@@ -135,7 +136,7 @@ void test_domain_seek_progress_requires_accepted_steps(void)
     if (state.seekSteps != 0U) throw std::runtime_error("seek progress should not advance without an accepted step");
 }
 
-void test_domain_load_cell_is_primary_stop_source(void)
+void test_domain_home_ignores_load_cell_trigger(void)
 {
     keyswitch::MotionState state = keyswitch::makeInitialState(0U);
     keyswitch::MotionConfig config = make_config();
@@ -145,9 +146,9 @@ void test_domain_load_cell_is_primary_stop_source(void)
 
     keyswitch::MotionOutputs outputs = keyswitch::tickMotion(&state, inputs, config, runtime);
 
-    if (state.homingState != keyswitch::HomingState::Backoff) throw std::runtime_error("load cell trigger should enter backoff");
-    if (state.lastStopSource != keyswitch::StopSource::LoadCell) throw std::runtime_error("load cell should be the recorded stop source");
-    if (outputs.stopSource != keyswitch::StopSource::LoadCell) throw std::runtime_error("outputs should report load cell stop source");
+    if (state.homingState != keyswitch::HomingState::Seek) throw std::runtime_error("load cell trigger should not interrupt homing seek");
+    if (outputs.issueStep != 1U) throw std::runtime_error("homing seek should continue stepping when only the load cell is active");
+    if (state.lastStopSource != keyswitch::StopSource::None) throw std::runtime_error("load cell should not be recorded as the homing stop source");
 }
 
 void test_domain_stallguard_acts_as_fallback_stop_source(void)
@@ -266,6 +267,37 @@ void test_domain_cycle_routine_returns_home_and_counts_cycles(void)
     if (state.homingState != keyswitch::HomingState::Done) throw std::runtime_error("cycle routine should return to Done state when complete");
 }
 
+void test_domain_cycle_latches_contact_and_keeps_pressing_until_threshold(void)
+{
+    keyswitch::MotionState state = keyswitch::makeInitialState(0U);
+    keyswitch::MotionConfig config = make_config();
+    keyswitch::RuntimeConfig runtime = make_runtime();
+    keyswitch::setCurrentPosition(&state, 0);
+    if (keyswitch::setPressTarget(&state, 4, config) != 1U) throw std::runtime_error("setPressTarget should accept a probe travel target");
+    if (keyswitch::startCycleRoutine(&state, 1U, config) != 1U) throw std::runtime_error("startCycleRoutine should start when homed");
+
+    keyswitch::MotionInputs inputs = make_inputs(60U, 1U);
+    inputs.loadCellRaw = 120U;
+    keyswitch::MotionOutputs outputs = keyswitch::tickMotion(&state, inputs, config, runtime);
+
+    if (state.probeContactActive != 1U) throw std::runtime_error("cycle press should latch first contact once raw force exceeds the probe threshold");
+    if (state.probeContactPosition != 0) throw std::runtime_error("probe contact should record the position where the first contact sample occurred");
+    if (state.homingState != keyswitch::HomingState::CycleToPress) throw std::runtime_error("first contact should keep the probe pressing toward the full travel target");
+    if (outputs.issueStep != 1U) throw std::runtime_error("first contact should continue requesting press steps");
+
+    inputs = make_inputs(61U, 1U);
+    inputs.loadCellRaw = 180U;
+    outputs = keyswitch::tickMotion(&state, inputs, config, runtime);
+    if (state.homingState != keyswitch::HomingState::CycleToPress) throw std::runtime_error("sub-threshold contact should not reverse the probe cycle");
+
+    inputs = make_inputs(62U, 1U);
+    inputs.loadCellRaw = 1000U;
+    inputs.loadCellTriggered = 1U;
+    outputs = keyswitch::tickMotion(&state, inputs, config, runtime);
+    if (state.homingState != keyswitch::HomingState::CycleToHome) throw std::runtime_error("load-cell threshold should end the press leg and start release");
+    if (outputs.stopSource != keyswitch::StopSource::LoadCell) throw std::runtime_error("threshold stop should report the load cell as the stop source");
+}
+
 void test_domain_workspace_range_supports_signed_positions(void)
 {
     keyswitch::MotionState state = keyswitch::makeInitialState(0U);
@@ -289,13 +321,14 @@ int main()
         test_domain_home_requires_release_before_reseek();
         test_domain_faults_when_switch_not_found();
         test_domain_seek_progress_requires_accepted_steps();
-        test_domain_load_cell_is_primary_stop_source();
+        test_domain_home_ignores_load_cell_trigger();
         test_domain_stallguard_acts_as_fallback_stop_source();
         test_domain_initial_idle_state_does_not_hold_driver_enabled();
         test_domain_done_state_holds_when_enabled();
         test_domain_absolute_move_tracks_position();
         test_domain_backoff_clears_fault_after_move_stop();
         test_domain_cycle_routine_returns_home_and_counts_cycles();
+        test_domain_cycle_latches_contact_and_keeps_pressing_until_threshold();
         test_domain_workspace_range_supports_signed_positions();
         std::cout << "PASS test_domain" << std::endl;
         return 0;

@@ -158,6 +158,35 @@ void test_load_cell_hx711_auto_tare_and_relative_force(void)
     if (load_cell_triggered(runtime) != 1U) throw std::runtime_error("hx711 relative force should trigger after stable above-threshold samples");
 }
 
+void test_load_cell_hx711_composite_rejects_outlier_cluster(void)
+{
+    LoadCellRuntime runtime = load_cell_make_default(1000U);
+    LoadCellConfig config = {};
+    config.source = (uint8_t)LoadCellSourceKind::Hx711;
+    config.threshold = 1000U;
+
+    load_cell_apply_config(&runtime, config);
+
+    for (uint32_t index = 0U; index < 32U; ++index)
+    {
+        load_cell_set_hx711_sample(&runtime, 5000);
+    }
+
+    load_cell_set_hx711_sample(&runtime, 6500);
+    load_cell_set_hx711_sample(&runtime, 8000);
+    load_cell_set_hx711_sample(&runtime, 6510);
+
+    if (load_cell_raw(runtime) != 0U) throw std::runtime_error("wide hx711 sample cluster should be rejected before updating raw force");
+    if (load_cell_triggered(runtime) != 0U) throw std::runtime_error("wide hx711 sample cluster should not trigger the load cell");
+
+    load_cell_set_hx711_sample(&runtime, 6490);
+    if (load_cell_raw(runtime) != 0U) throw std::runtime_error("a single follow-up sample should not eject the earlier hx711 outlier from the sliding window");
+
+    load_cell_set_hx711_sample(&runtime, 6505);
+    if (load_cell_raw(runtime) == 0U) throw std::runtime_error("sliding hx711 composite window should accept the next tight sample cluster");
+    if (load_cell_triggered(runtime) != 1U) throw std::runtime_error("an accepted hx711 composite cluster should count as a fully validated reading");
+}
+
 void test_load_cell_hx711_idle_noise_floor_zeros_small_residuals(void)
 {
     LoadCellRuntime runtime = load_cell_make_default(1000U);
@@ -178,6 +207,90 @@ void test_load_cell_hx711_idle_noise_floor_zeros_small_residuals(void)
 
     if (load_cell_raw(runtime) != 0U) throw std::runtime_error("small unloaded hx711 residuals should be normalized back to zero");
     if (load_cell_triggered(runtime) != 0U) throw std::runtime_error("small unloaded hx711 residuals should not trigger the load cell");
+}
+
+void test_load_cell_hx711_release_settles_quickly_back_to_zero(void)
+{
+    LoadCellRuntime runtime = load_cell_make_default(1000U);
+    LoadCellConfig config = {};
+    config.source = (uint8_t)LoadCellSourceKind::Hx711;
+    config.threshold = 1000U;
+
+    load_cell_apply_config(&runtime, config);
+
+    for (uint32_t index = 0U; index < 32U; ++index)
+    {
+        load_cell_set_hx711_sample(&runtime, 5000);
+    }
+
+    load_cell_set_hx711_sample(&runtime, 6500);
+    load_cell_set_hx711_sample(&runtime, 6500);
+    load_cell_set_hx711_sample(&runtime, 6500);
+
+    if (load_cell_triggered(runtime) != 1U) throw std::runtime_error("stable loaded hx711 samples should trigger before release");
+
+    for (uint32_t index = 0U; index < 6U; ++index)
+    {
+        load_cell_set_hx711_sample(&runtime, 5000);
+    }
+
+    if (load_cell_raw(runtime) != 0U) throw std::runtime_error("released hx711 signal should settle back to zero within a few baseline samples");
+    if (load_cell_triggered(runtime) != 0U) throw std::runtime_error("released hx711 signal should clear the trigger once the load is gone");
+}
+
+void test_load_cell_hx711_release_rate_is_configurable(void)
+{
+    LoadCellRuntime runtime = load_cell_make_default(1000U);
+    LoadCellConfig config = {};
+    config.source = (uint8_t)LoadCellSourceKind::Hx711;
+    config.threshold = 1000U;
+    config.hx711ReleaseRate = 4U;
+
+    load_cell_apply_config(&runtime, config);
+
+    for (uint32_t index = 0U; index < 32U; ++index)
+    {
+        load_cell_set_hx711_sample(&runtime, 5000);
+    }
+
+    load_cell_set_hx711_sample(&runtime, 6500);
+    load_cell_set_hx711_sample(&runtime, 6500);
+    load_cell_set_hx711_sample(&runtime, 6500);
+
+    for (uint32_t index = 0U; index < 6U; ++index)
+    {
+        load_cell_set_hx711_sample(&runtime, 5000);
+    }
+
+    if (load_cell_raw(runtime) == 0U) throw std::runtime_error("slower configured hx711 release rate should keep a residual signal longer than the default profile");
+    if (runtime.hx711ReleaseRate != 4U) throw std::runtime_error("runtime should retain the configured hx711 release rate");
+}
+
+void test_load_cell_hx711_rise_rate_is_configurable(void)
+{
+    LoadCellRuntime runtime = load_cell_make_default(1000U);
+    LoadCellConfig config = {};
+    config.source = (uint8_t)LoadCellSourceKind::Hx711;
+    config.threshold = 1000U;
+    config.hx711RiseRate = 8U;
+
+    load_cell_apply_config(&runtime, config);
+
+    for (uint32_t index = 0U; index < 32U; ++index)
+    {
+        load_cell_set_hx711_sample(&runtime, 5000);
+    }
+
+    load_cell_set_hx711_sample(&runtime, 5400);
+    load_cell_set_hx711_sample(&runtime, 5420);
+    load_cell_set_hx711_sample(&runtime, 5410);
+    load_cell_set_hx711_sample(&runtime, 6500);
+    load_cell_set_hx711_sample(&runtime, 6510);
+    load_cell_set_hx711_sample(&runtime, 6490);
+
+    if (load_cell_raw(runtime) <= 400U) throw std::runtime_error("configured hx711 rise rate should still allow force to rise above the first contact sample");
+    if (load_cell_raw(runtime) >= 700U) throw std::runtime_error("slower configured hx711 rise rate should ramp force more gently after the first contact sample");
+    if (runtime.hx711RiseRate != 8U) throw std::runtime_error("runtime should retain the configured hx711 rise rate");
 }
 
 void test_load_cell_connector_names_and_profiles(void)
@@ -205,6 +318,27 @@ void test_load_cell_connector_names_and_profiles(void)
     if (load_cell_connector_from_cstr("NOPE", &connector) != 0U) throw std::runtime_error("unknown connector should not parse");
 }
 
+void test_load_cell_calibrated_grams_uses_reference_mass_when_present(void)
+{
+    LoadCellConfig config = {};
+    config.threshold = 1000U;
+    config.calibrationRaw = 2500U;
+    config.calibrationGrams = 50U;
+
+    if (load_cell_calibrated_grams(0U, config) != 0U) throw std::runtime_error("zero raw should remain zero grams after calibration");
+    if (load_cell_calibrated_grams(2500U, config) != 50U) throw std::runtime_error("calibration reference raw should map to the reference grams");
+    if (load_cell_calibrated_grams(1250U, config) != 25U) throw std::runtime_error("calibration should scale linearly from the stored reference");
+}
+
+void test_load_cell_calibrated_grams_falls_back_to_threshold_estimate(void)
+{
+    LoadCellConfig config = {};
+    config.threshold = 1000U;
+
+    if (load_cell_calibrated_grams(4000U, config) != 100U) throw std::runtime_error("uncalibrated fallback should still map the default full-scale raw to 100 grams");
+    if (load_cell_calibrated_grams(2000U, config) != 50U) throw std::runtime_error("uncalibrated fallback should preserve the legacy midpoint estimate");
+}
+
 int main()
 {
     test_load_cell_defaults_to_zero_raw_and_configured_threshold();
@@ -216,7 +350,13 @@ int main()
     test_load_cell_non_simulation_modes_do_not_reuse_simulated_raw();
     test_load_cell_hx711_decode_and_thresholding();
     test_load_cell_hx711_auto_tare_and_relative_force();
+    test_load_cell_hx711_composite_rejects_outlier_cluster();
     test_load_cell_hx711_idle_noise_floor_zeros_small_residuals();
+    test_load_cell_hx711_release_settles_quickly_back_to_zero();
+    test_load_cell_hx711_release_rate_is_configurable();
+    test_load_cell_hx711_rise_rate_is_configurable();
     test_load_cell_connector_names_and_profiles();
+    test_load_cell_calibrated_grams_uses_reference_mass_when_present();
+    test_load_cell_calibrated_grams_falls_back_to_threshold_estimate();
     return 0;
 }
