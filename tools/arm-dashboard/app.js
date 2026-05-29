@@ -3,6 +3,8 @@ const dom = {
   disconnectButton: document.getElementById('disconnectButton'),
   connectionPill: document.getElementById('connectionPill'),
   readerPill: document.getElementById('readerPill'),
+  disconnectedSplash: document.getElementById('disconnectedSplash'),
+  liveWorkspace: document.getElementById('liveWorkspace'),
   baudRateInput: document.getElementById('baudRateInput'),
   pollRateInput: document.getElementById('pollRateInput'),
   autoPollToggle: document.getElementById('autoPollToggle'),
@@ -37,6 +39,12 @@ const dom = {
   loadRoutinePresetButton: document.getElementById('loadRoutinePresetButton'),
   clearChartButton: document.getElementById('clearChartButton'),
   clearLoadCellChartButton: document.getElementById('clearLoadCellChartButton'),
+  refreshConfigButton: document.getElementById('refreshConfigButton'),
+  saveConfigButton: document.getElementById('saveConfigButton'),
+  tareButton: document.getElementById('tareButton'),
+  rebootButton: document.getElementById('rebootButton'),
+  bootloaderButton: document.getElementById('bootloaderButton'),
+  resetConfigButton: document.getElementById('resetConfigButton'),
   loadSimulatedCurveButton: document.getElementById('loadSimulatedCurveButton'),
   clearResponseCurveButton: document.getElementById('clearResponseCurveButton'),
   telemetryChart: document.getElementById('telemetryChart'),
@@ -64,7 +72,38 @@ const dom = {
   loadCellRawValue: document.getElementById('loadCellRawValue'),
   loadCellThresholdValue: document.getElementById('loadCellThresholdValue'),
   loadCellPeakValue: document.getElementById('loadCellPeakValue'),
-  loadCellTriggerValue: document.getElementById('loadCellTriggerValue')
+  loadCellTriggerValue: document.getElementById('loadCellTriggerValue'),
+  configStateValue: document.getElementById('configStateValue'),
+  configDirtyValue: document.getElementById('configDirtyValue'),
+  configLoadCellProfileValue: document.getElementById('configLoadCellProfileValue'),
+  configLoadCellSourceValue: document.getElementById('configLoadCellSourceValue'),
+  configLoadCellPinsValue: document.getElementById('configLoadCellPinsValue'),
+  configLoadCellThresholdValue: document.getElementById('configLoadCellThresholdValue'),
+  configAllowUnverifiedValue: document.getElementById('configAllowUnverifiedValue'),
+  configPanelColorValue: document.getElementById('configPanelColorValue'),
+  configPanelSwatch: document.getElementById('configPanelSwatch'),
+  loadCellConfigForm: document.getElementById('loadCellConfigForm'),
+  loadCellConnectorSelect: document.getElementById('loadCellConnectorSelect'),
+  loadCellSourceSelect: document.getElementById('loadCellSourceSelect'),
+  loadCellThresholdInput: document.getElementById('loadCellThresholdInput'),
+  loadCellDataPinInput: document.getElementById('loadCellDataPinInput'),
+  loadCellClockPinInput: document.getElementById('loadCellClockPinInput'),
+  runtimeConfigForm: document.getElementById('runtimeConfigForm'),
+  allowUnverifiedMotionToggle: document.getElementById('allowUnverifiedMotionToggle'),
+  panelColorRedInput: document.getElementById('panelColorRedInput'),
+  panelColorGreenInput: document.getElementById('panelColorGreenInput'),
+  panelColorBlueInput: document.getElementById('panelColorBlueInput'),
+  themeModeSelect: document.getElementById('themeModeSelect'),
+  themeStatusValue: document.getElementById('themeStatusValue'),
+  sidebarConnectionValue: document.getElementById('sidebarConnectionValue'),
+  sidebarMachineValue: document.getElementById('sidebarMachineValue'),
+  currentViewEyebrow: document.getElementById('currentViewEyebrow'),
+  currentViewTitle: document.getElementById('currentViewTitle'),
+  currentViewDescription: document.getElementById('currentViewDescription'),
+  summaryForcePill: document.getElementById('summaryForcePill'),
+  summaryStatePill: document.getElementById('summaryStatePill'),
+  viewButtons: Array.from(document.querySelectorAll('[data-view-button]')),
+  viewSections: Array.from(document.querySelectorAll('.dashboard-view'))
 };
 
 const state = {
@@ -109,8 +148,44 @@ const state = {
   simulatedCurve: {
     meta: null,
     samples: []
+  },
+  activeView: 'overview',
+  themeMode: 'auto',
+  config: {
+    loaded: null,
+    dirty: null,
+    rebootRequired: null,
+    allowUnverifiedMotion: null,
+    loadCell: {
+      source: 'hx711',
+      connector: 'custom',
+      threshold: 1000,
+      dataPin: 'PE4',
+      clockPin: 'PE5'
+    },
+    panelColor: { red: 255, green: 0, blue: 0 }
   }
 };
+
+const VIEW_META = {
+  overview: {
+    eyebrow: 'Overview',
+    title: 'Overview',
+    description: 'Live machine state, charts, and bench telemetry at a glance.'
+  },
+  controls: {
+    eyebrow: 'Controls',
+    title: 'Controls & Setup',
+    description: 'Tune runtime behavior, adjust load-cell wiring and thresholds, and drive the mechanism directly.'
+  },
+  automation: {
+    eyebrow: 'Automation',
+    title: 'Automation & Console',
+    description: 'Preview simulated response curves, run macros, and drive raw command workflows from one place.'
+  }
+};
+
+const systemThemeMedia = window.matchMedia('(prefers-color-scheme: dark)');
 
 const STOP_SOURCE_LABELS = {
   0: 'None',
@@ -139,6 +214,53 @@ function updateConnectionUi() {
   dom.connectionPill.textContent = state.isConnected ? 'Connected' : 'Disconnected';
   dom.connectionPill.className = `pill ${state.isConnected ? '' : 'pill-offline'}`.trim();
   dom.readerPill.textContent = state.isReading ? 'Streaming' : 'Idle';
+  dom.sidebarConnectionValue.textContent = state.isConnected ? 'Connected' : 'Disconnected';
+  document.body.classList.toggle('is-disconnected', !state.isConnected);
+}
+
+function updateViewSummary() {
+  const view = VIEW_META[state.activeView] ?? VIEW_META.overview;
+  const stopLabel = STOP_SOURCE_LABELS[state.telemetry.source] ?? `Code ${state.telemetry.source}`;
+  const loadState = state.telemetry.load ? 'Load active' : (state.telemetry.mech ? 'Mechanical trip' : (state.telemetry.stall ? 'Stall trip' : 'Load clear'));
+
+  dom.currentViewEyebrow.textContent = view.eyebrow;
+  dom.currentViewTitle.textContent = view.title;
+  dom.currentViewDescription.textContent = view.description;
+  dom.summaryForcePill.textContent = `Force ${state.telemetry.force}`;
+  dom.summaryStatePill.textContent = `${loadState} / ${stopLabel}`;
+}
+
+function setActiveView(viewName) {
+  state.activeView = VIEW_META[viewName] ? viewName : 'overview';
+  dom.viewButtons.forEach((button) => {
+    button.classList.toggle('is-active', button.dataset.viewButton === state.activeView);
+  });
+  dom.viewSections.forEach((section) => {
+    section.classList.toggle('is-active', section.dataset.view === state.activeView);
+  });
+  updateViewSummary();
+}
+
+function resolveTheme() {
+  if (state.themeMode === 'dark') {
+    return 'dark';
+  }
+
+  if (state.themeMode === 'light') {
+    return 'light';
+  }
+
+  return systemThemeMedia.matches ? 'dark' : 'light';
+}
+
+function applyTheme() {
+  const resolvedTheme = resolveTheme();
+  document.documentElement.dataset.theme = resolvedTheme;
+  if (state.themeMode === 'auto') {
+    dom.themeStatusValue.textContent = `Following system: ${resolvedTheme}.`;
+  } else {
+    dom.themeStatusValue.textContent = `Forced ${resolvedTheme} mode.`;
+  }
 }
 
 function parseKeyValueLine(line) {
@@ -197,6 +319,7 @@ function updateTelemetryCardValues() {
   dom.loopMaxValue.textContent = `Max ${state.telemetry.loopMaxUs} us`;
   dom.stepTotalValue.textContent = String(state.telemetry.stepsTotal);
   dom.stepWindowValue.textContent = `HB ${state.telemetry.stepsHeartbeat} / Burst ${state.telemetry.stepsBurst} / Sync ${state.telemetry.tmcSync}`;
+  dom.sidebarMachineValue.textContent = `Force ${state.telemetry.force} / ${state.telemetry.hold ? 'Hold on' : 'Hold off'}`;
 
   if (Number.isFinite(driver.irun)) {
     dom.irunInput.value = String(driver.irun);
@@ -210,6 +333,8 @@ function updateTelemetryCardValues() {
   if (Number.isFinite(driver.sgthrs)) {
     dom.sgthrsInput.value = String(driver.sgthrs);
   }
+
+  updateViewSummary();
 }
 
 function updateLoadCellValues() {
@@ -220,6 +345,90 @@ function updateLoadCellValues() {
   dom.loadCellTriggerValue.textContent = state.loadCell.triggered ? 'Triggered' : 'Clear';
   dom.loadCellTriggerValue.classList.toggle('is-triggered', Boolean(state.loadCell.triggered));
   dom.loadCellSummary.textContent = `Live ${state.loadCell.source} samples. Raw ${state.loadCell.raw}, threshold ${state.loadCell.threshold}, peak ${state.loadCell.peak}, trigger ${state.loadCell.triggered ? 'active' : 'clear'}.`;
+}
+
+function updateConfigValues() {
+  const loadedText = state.config.loaded === null ? 'Unknown' : (state.config.loaded ? 'Loaded' : 'Defaults');
+  const dirtyText = state.config.dirty === null ? '--' : (state.config.dirty ? 'Yes' : 'No');
+  const rebootText = state.config.rebootRequired === null ? '--' : (state.config.rebootRequired ? 'Yes' : 'No');
+  const allowText = state.config.allowUnverifiedMotion === null ? '--' : (state.config.allowUnverifiedMotion ? 'Enabled' : 'Verified only');
+  const panelRgbText = `${state.config.panelColor.red}, ${state.config.panelColor.green}, ${state.config.panelColor.blue}`;
+
+  dom.configStateValue.textContent = loadedText;
+  dom.configDirtyValue.textContent = `Dirty ${dirtyText} / Reboot ${rebootText}`;
+  dom.configLoadCellProfileValue.textContent = state.config.loadCell.connector.toUpperCase();
+  dom.configLoadCellSourceValue.textContent = `Source ${state.config.loadCell.source.toUpperCase()}`;
+  dom.configLoadCellPinsValue.textContent = `${state.config.loadCell.dataPin} / ${state.config.loadCell.clockPin}`;
+  dom.configLoadCellThresholdValue.textContent = `Threshold ${state.config.loadCell.threshold}`;
+  dom.configAllowUnverifiedValue.textContent = allowText;
+  dom.configPanelColorValue.textContent = panelRgbText;
+  dom.configPanelSwatch.style.background = `rgb(${state.config.panelColor.red}, ${state.config.panelColor.green}, ${state.config.panelColor.blue})`;
+
+  dom.loadCellConnectorSelect.value = state.config.loadCell.connector;
+  dom.loadCellSourceSelect.value = state.config.loadCell.source;
+  dom.loadCellThresholdInput.value = String(state.config.loadCell.threshold);
+  dom.loadCellDataPinInput.value = state.config.loadCell.dataPin;
+  dom.loadCellClockPinInput.value = state.config.loadCell.clockPin;
+  dom.allowUnverifiedMotionToggle.checked = Boolean(state.config.allowUnverifiedMotion);
+  dom.panelColorRedInput.value = String(state.config.panelColor.red);
+  dom.panelColorGreenInput.value = String(state.config.panelColor.green);
+  dom.panelColorBlueInput.value = String(state.config.panelColor.blue);
+
+  updateLoadCellConfigUi();
+}
+
+function updateLoadCellConfigUi() {
+  const isCustom = dom.loadCellConnectorSelect.value === 'custom';
+  const isHx711 = dom.loadCellSourceSelect.value === 'hx711';
+
+  dom.loadCellSourceSelect.disabled = !isCustom;
+  dom.loadCellDataPinInput.disabled = !isCustom;
+  dom.loadCellClockPinInput.disabled = !isCustom || !isHx711;
+}
+
+function parseConfigLine(line) {
+  if (line.startsWith('config loaded=')) {
+    const parsed = parseKeyValueLine(line.replace('config ', ''));
+    state.config.loaded = parsed.loaded ?? state.config.loaded;
+    state.config.dirty = parsed.dirty ?? state.config.dirty;
+    state.config.rebootRequired = parsed.reboot ?? state.config.rebootRequired;
+    updateConfigValues();
+    return true;
+  }
+
+  if (line.startsWith('config loadcell.source=')) {
+    const match = line.match(/^config loadcell\.source=([^ ]+) loadcell\.connector=([^ ]+) loadcell\.threshold=(\d+) pin\.loadcell_data=([^ ]+) pin\.loadcell_clock=([^ ]+)$/);
+    if (!match) {
+      return false;
+    }
+
+    state.config.loadCell.source = match[1].toLowerCase();
+    state.config.loadCell.connector = match[2].toLowerCase();
+    state.config.loadCell.threshold = Number(match[3]);
+    state.config.loadCell.dataPin = match[4].toUpperCase();
+    state.config.loadCell.clockPin = match[5].toUpperCase();
+    updateConfigValues();
+    return true;
+  }
+
+  if (line.startsWith('config telemetry.status_interval_ms=')) {
+    const allowMatch = line.match(/tmc\.allow_unverified_motion=(\d+)/);
+    const panelMatch = line.match(/panel\.color_rgb=(\d+),(\d+),(\d+)/);
+
+    if (allowMatch) {
+      state.config.allowUnverifiedMotion = Number(allowMatch[1]);
+    }
+    if (panelMatch) {
+      state.config.panelColor.red = Number(panelMatch[1]);
+      state.config.panelColor.green = Number(panelMatch[2]);
+      state.config.panelColor.blue = Number(panelMatch[3]);
+    }
+
+    updateConfigValues();
+    return true;
+  }
+
+  return false;
 }
 
 function pushChartSample(force, position) {
@@ -545,6 +754,10 @@ async function loadSimulatedCurve() {
 }
 
 function handleTelemetryLine(line) {
+  if (parseConfigLine(line)) {
+    return true;
+  }
+
   if (line.startsWith('diag0=')) {
     const parsed = parseKeyValueLine(line);
     Object.assign(state.telemetry, {
@@ -611,6 +824,36 @@ function handleTelemetryLine(line) {
     return true;
   }
 
+  if (line.startsWith('cmd: set key=')) {
+    const match = line.match(/^cmd: set key=([^ ]+) value=(.+) ok=(\d+)(?: reboot=(\d+))?$/);
+    if (match && Number(match[3]) === 1) {
+      state.config.dirty = 1;
+      if (match[4] !== undefined) {
+        state.config.rebootRequired = Number(match[4]);
+      }
+      updateConfigValues();
+    }
+    return false;
+  }
+
+  if (line.startsWith('cmd: save ')) {
+    const match = line.match(/^cmd: save ok=(\d+) reboot=(\d+)$/);
+    if (match && Number(match[1]) === 1) {
+      state.config.loaded = 1;
+      state.config.dirty = 0;
+      state.config.rebootRequired = Number(match[2]);
+      updateConfigValues();
+    }
+    return false;
+  }
+
+  if (line.startsWith('cmd: resetcfg ')) {
+    state.config.dirty = 1;
+    state.config.rebootRequired = 1;
+    updateConfigValues();
+    return false;
+  }
+
   return false;
 }
 
@@ -622,6 +865,17 @@ async function sendCommand(command) {
   const payload = `${command.trim()}\r\n`;
   await state.writer.write(new TextEncoder().encode(payload));
   logLine('tx', command.trim());
+}
+
+async function runCommandSequence(commands, delayMs = 120) {
+  for (const command of commands) {
+    await sendCommand(command);
+    await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+  }
+}
+
+async function refreshConfigState() {
+  await sendCommand('config');
 }
 
 async function disconnectSerial() {
@@ -725,6 +979,12 @@ function startPolling() {
   }, interval);
 }
 
+function scheduleInitialRefresh() {
+  window.setTimeout(() => {
+    runCommandSequence(['config', 'status', 'safety', 'driver'], 120).catch((error) => logLine('err', error.message || String(error)));
+  }, 180);
+}
+
 async function connectSerial() {
   if (!('serial' in navigator)) {
     throw new Error('This browser does not support Web Serial. Use Chrome or Edge on localhost.');
@@ -739,6 +999,45 @@ async function connectSerial() {
   logLine('sys', 'Serial connection opened.');
   startPolling();
   startReadLoop();
+  scheduleInitialRefresh();
+}
+
+async function applyLoadCellConfig() {
+  const connector = dom.loadCellConnectorSelect.value.trim().toLowerCase();
+  const source = dom.loadCellSourceSelect.value.trim().toLowerCase();
+  const threshold = Math.max(Number(dom.loadCellThresholdInput.value) || 1, 1);
+  const dataPin = dom.loadCellDataPinInput.value.trim().toUpperCase();
+  const clockPin = dom.loadCellClockPinInput.value.trim().toUpperCase();
+  const commands = [];
+
+  if (connector !== 'custom') {
+    commands.push(`set loadcell.connector ${connector}`);
+  } else {
+    commands.push(`set loadcell.source ${source}`);
+    commands.push(`set pin.loadcell_data ${dataPin}`);
+    if (source === 'hx711' && clockPin) {
+      commands.push(`set pin.loadcell_clock ${clockPin}`);
+    }
+  }
+
+  commands.push(`set loadcell.threshold ${threshold}`);
+  await runCommandSequence(commands, 120);
+  await refreshConfigState();
+}
+
+async function applyRuntimeConfig() {
+  const allowUnverified = dom.allowUnverifiedMotionToggle.checked ? 1 : 0;
+  const red = Math.min(Math.max(Number(dom.panelColorRedInput.value) || 0, 0), 255);
+  const green = Math.min(Math.max(Number(dom.panelColorGreenInput.value) || 0, 0), 255);
+  const blue = Math.min(Math.max(Number(dom.panelColorBlueInput.value) || 0, 0), 255);
+
+  await runCommandSequence([
+    `set tmc.allow_unverified_motion ${allowUnverified}`,
+    `set panel.color_red ${red}`,
+    `set panel.color_green ${green}`,
+    `set panel.color_blue ${blue}`
+  ], 120);
+  await refreshConfigState();
 }
 
 async function runMacro() {
@@ -792,6 +1091,29 @@ function bindCommandButtons() {
 }
 
 function bindUi() {
+  dom.viewButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      setActiveView(button.dataset.viewButton);
+    });
+  });
+
+  dom.themeModeSelect.addEventListener('change', () => {
+    state.themeMode = dom.themeModeSelect.value;
+    applyTheme();
+  });
+
+  const onSystemThemeChange = () => {
+    if (state.themeMode === 'auto') {
+      applyTheme();
+    }
+  };
+
+  if (typeof systemThemeMedia.addEventListener === 'function') {
+    systemThemeMedia.addEventListener('change', onSystemThemeChange);
+  } else if (typeof systemThemeMedia.addListener === 'function') {
+    systemThemeMedia.addListener(onSystemThemeChange);
+  }
+
   dom.connectButton.addEventListener('click', async () => {
     try {
       await connectSerial();
@@ -833,6 +1155,8 @@ function bindUi() {
 
   dom.autoPollToggle.addEventListener('change', startPolling);
   dom.pollRateInput.addEventListener('change', startPolling);
+  dom.loadCellConnectorSelect.addEventListener('change', updateLoadCellConfigUi);
+  dom.loadCellSourceSelect.addEventListener('change', updateLoadCellConfigUi);
 
   dom.manualCommandForm.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -874,6 +1198,40 @@ function bindUi() {
   dom.setSgthrsButton.addEventListener('click', () => sendCommand(`sgthrs ${dom.sgthrsInput.value}`).catch((error) => logLine('err', error.message || String(error))));
   dom.setSimLoadButton.addEventListener('click', () => sendCommand(`simload ${dom.simLoadInput.value}`).catch((error) => logLine('err', error.message || String(error))));
   dom.setSimThresholdButton.addEventListener('click', () => sendCommand(`simthresh ${dom.simThresholdInput.value}`).catch((error) => logLine('err', error.message || String(error))));
+  dom.refreshConfigButton.addEventListener('click', () => refreshConfigState().catch((error) => logLine('err', error.message || String(error))));
+  dom.saveConfigButton.addEventListener('click', () => sendCommand('save').then(() => window.setTimeout(() => refreshConfigState().catch((error) => logLine('err', error.message || String(error))), 150)).catch((error) => logLine('err', error.message || String(error))));
+  dom.tareButton.addEventListener('click', () => sendCommand('tare').catch((error) => logLine('err', error.message || String(error))));
+  dom.rebootButton.addEventListener('click', () => sendCommand('reboot').catch((error) => logLine('err', error.message || String(error))));
+  dom.bootloaderButton.addEventListener('click', () => sendCommand('bootloader').catch((error) => logLine('err', error.message || String(error))));
+  dom.resetConfigButton.addEventListener('click', async () => {
+    if (!window.confirm('Reset persisted config to defaults and mark the board for reboot?')) {
+      return;
+    }
+    try {
+      await sendCommand('resetcfg');
+      window.setTimeout(() => refreshConfigState().catch((error) => logLine('err', error.message || String(error))), 150);
+    } catch (error) {
+      logLine('err', error.message || String(error));
+    }
+  });
+
+  dom.loadCellConfigForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await applyLoadCellConfig();
+    } catch (error) {
+      logLine('err', error.message || String(error));
+    }
+  });
+
+  dom.runtimeConfigForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await applyRuntimeConfig();
+    } catch (error) {
+      logLine('err', error.message || String(error));
+    }
+  });
 
   dom.runMacroButton.addEventListener('click', () => runMacro().catch((error) => logLine('err', error.message || String(error))));
   dom.stopMacroButton.addEventListener('click', () => {
@@ -899,6 +1257,10 @@ bindUi();
 updateConnectionUi();
 updateTelemetryCardValues();
 updateLoadCellValues();
+updateConfigValues();
+setActiveView(state.activeView);
+dom.themeModeSelect.value = state.themeMode;
+applyTheme();
 renderChart();
 renderLoadCellChart();
 renderResponseCurve();

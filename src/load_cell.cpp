@@ -4,7 +4,13 @@
 #include <string.h>
 
 static const uint8_t kHx711TriggerDebounceCount = 3U;
+static const uint8_t kHx711WarmupSampleCount = 16U;
 static const uint8_t kHx711AutoTareSampleCount = 16U;
+
+static uint32_t hx711_idle_force_floor(uint32_t threshold)
+{
+    return (threshold > 0U) ? ((threshold / 16U) + 1U) : 16U;
+}
 
 static void load_cell_update_hx711_trigger_state(LoadCellRuntime *runtime)
 {
@@ -64,6 +70,7 @@ void load_cell_apply_config(LoadCellRuntime *runtime, const LoadCellConfig &conf
         runtime->triggerState = 0U;
         runtime->overThresholdCount = 0U;
         runtime->underThresholdCount = 0U;
+        runtime->hx711WarmupSamples = 0U;
         runtime->hx711TareSamples = 0U;
         runtime->hx711TareReady = 0U;
         runtime->hx711Baseline = 0;
@@ -107,6 +114,16 @@ void load_cell_set_hx711_sample(LoadCellRuntime *runtime, int32_t sample)
 
     if (runtime->hx711TareReady == 0U)
     {
+        if (runtime->hx711WarmupSamples < kHx711WarmupSampleCount)
+        {
+            ++runtime->hx711WarmupSamples;
+            runtime->raw = 0U;
+            runtime->triggerState = 0U;
+            runtime->overThresholdCount = 0U;
+            runtime->underThresholdCount = 0U;
+            return;
+        }
+
         runtime->hx711Accumulator += sample;
         ++runtime->hx711TareSamples;
         runtime->raw = 0U;
@@ -125,6 +142,12 @@ void load_cell_set_hx711_sample(LoadCellRuntime *runtime, int32_t sample)
     const int32_t relative_sample = sample - runtime->hx711Baseline;
     const uint32_t relative_force = load_cell_force_from_signed(relative_sample);
     runtime->raw = blend_u32(runtime->raw, relative_force);
+
+    const uint32_t idle_force_floor = hx711_idle_force_floor(runtime->threshold);
+    if ((relative_force < idle_force_floor) && (runtime->raw < idle_force_floor))
+    {
+        runtime->raw = 0U;
+    }
 
     if (relative_force < ((runtime->threshold > 0U) ? ((runtime->threshold / 8U) + 1U) : 32U))
     {
@@ -161,6 +184,7 @@ void load_cell_tare(LoadCellRuntime *runtime)
 
     if (runtime->source == (uint8_t)LoadCellSourceKind::Hx711)
     {
+        runtime->hx711WarmupSamples = 0U;
         runtime->hx711TareSamples = 0U;
         runtime->hx711TareReady = 0U;
         runtime->hx711Baseline = 0;
@@ -199,6 +223,7 @@ void load_cell_clear(LoadCellRuntime *runtime)
     runtime->triggerState = 0U;
     runtime->overThresholdCount = 0U;
     runtime->underThresholdCount = 0U;
+    runtime->hx711WarmupSamples = 0U;
     runtime->hx711TareSamples = 0U;
     runtime->hx711TareReady = 0U;
     runtime->hx711Baseline = 0;

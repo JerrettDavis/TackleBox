@@ -8,22 +8,87 @@
 </head>
 <body>
   <div class="app-shell">
-    <header class="hero">
-      <div>
-        <p class="eyebrow">Web Serial Operator Console</p>
-        <h1>SKR2 Arm Console</h1>
-        <p class="hero-copy">Connect directly to the tester board over USB CDC, monitor live telemetry, tune the driver, run motion routines, and orchestrate scripted macros from the browser.</p>
+    <aside class="sidebar panel">
+      <div class="sidebar-brand">
+        <p class="eyebrow">Bench Operator</p>
+        <h2>SKR2 Control</h2>
+        <p class="sidebar-copy">Fluidd-style navigation for live control, setup, telemetry, and bench workflows.</p>
       </div>
-      <div class="hero-panel">
-        <div class="status-puck-row">
-          <span id="connectionPill" class="pill pill-offline">Disconnected</span>
-          <span id="readerPill" class="pill">Idle</span>
+
+      <section class="sidebar-section">
+        <div class="sidebar-section-header">
+          <span class="sidebar-section-title">Views</span>
         </div>
-        <div class="connection-actions">
-          <button id="connectButton" class="primary-button">Connect Serial</button>
-          <button id="disconnectButton" class="secondary-button" disabled>Disconnect</button>
+        <nav class="sidebar-nav" aria-label="Dashboard views">
+          <button type="button" class="sidebar-nav-button is-active" data-view-button="overview">Overview</button>
+          <button type="button" class="sidebar-nav-button" data-view-button="controls">Controls</button>
+          <button type="button" class="sidebar-nav-button" data-view-button="automation">Automation</button>
+        </nav>
+      </section>
+
+      <section class="sidebar-section">
+        <div class="sidebar-section-header">
+          <span class="sidebar-section-title">Common Actions</span>
         </div>
-        <div class="connection-meta">
+        <div class="common-actions-grid">
+          <button type="button" class="chip-button command-chip" data-command="status">Status</button>
+          <button type="button" class="chip-button command-chip" data-command="safety">Safety</button>
+          <button type="button" class="chip-button command-chip" data-command="driver">Driver</button>
+          <button type="button" class="chip-button command-chip" data-command="config">Config</button>
+          <button type="button" class="secondary-button command-chip" data-command="home">Home</button>
+          <button type="button" class="secondary-button command-chip" data-command="tare">Tare</button>
+          <button type="button" class="secondary-button command-chip" data-command="hold on">Hold On</button>
+          <button type="button" class="secondary-button command-chip" data-command="hold off">Hold Off</button>
+          <button type="button" class="secondary-button command-chip" data-command="save">Save</button>
+          <button type="button" class="danger-button command-chip" data-command="stop">Stop</button>
+        </div>
+      </section>
+
+      <section class="sidebar-section">
+        <div class="sidebar-section-header">
+          <span class="sidebar-section-title">Theme</span>
+        </div>
+        <label>
+          Theme mode
+          <select id="themeModeSelect">
+            <option value="auto">Auto</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        <p id="themeStatusValue" class="helper-copy compact-copy">Following system.</p>
+      </section>
+
+      <section class="sidebar-section sidebar-status-strip">
+        <span id="sidebarConnectionValue" class="sidebar-status-label">Disconnected</span>
+        <span id="sidebarMachineValue" class="sidebar-status-footnote">Force 0 / Hold off</span>
+      </section>
+    </aside>
+
+    <main class="workspace-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Web Serial Operator Console</p>
+          <h1>SKR2 Arm Console</h1>
+          <p class="hero-copy">Connect directly to the tester board over USB CDC, monitor live telemetry, tune the driver, run motion routines, and orchestrate scripted macros from the browser.</p>
+        </div>
+        <div class="hero-panel">
+          <div class="status-puck-row">
+            <span id="connectionPill" class="pill pill-offline">Disconnected</span>
+            <span id="readerPill" class="pill">Idle</span>
+          </div>
+          <div class="connection-actions">
+            <button id="disconnectButton" class="secondary-button" disabled>Disconnect</button>
+          </div>
+        </div>
+      </header>
+
+      <section id="disconnectedSplash" class="panel splash-panel">
+        <div class="splash-copy-block">
+          <p class="eyebrow">Disconnected Session</p>
+          <h2>Bench console is standing by.</h2>
+        </div>
+        <div class="connection-meta splash-settings">
           <label>
             Baud
             <input id="baudRateInput" type="number" min="9600" step="100" value="115200">
@@ -37,258 +102,375 @@
             Auto poll live telemetry and driver
           </label>
         </div>
-      </div>
-    </header>
-
-    <main class="dashboard-grid">
-      <section class="panel state-panel span-2">
-        <div class="panel-header">
-          <h2>Machine State</h2>
-          <div class="panel-actions">
-            <button data-command="status" class="chip-button command-chip">Status</button>
-            <button data-command="safety" class="chip-button command-chip">Safety</button>
-            <button data-command="driver" class="chip-button command-chip">Driver</button>
-          </div>
-        </div>
-        <div class="telemetry-cards">
-          <article class="telemetry-card accent-sand">
-            <span class="telemetry-label">Position</span>
-            <span id="positionValue" class="telemetry-value">0</span>
-            <span id="targetValue" class="telemetry-footnote">Target 0</span>
-          </article>
-          <article class="telemetry-card accent-blue">
-            <span class="telemetry-label">Home / Hold</span>
-            <span id="homedValue" class="telemetry-value">No</span>
-            <span id="holdValue" class="telemetry-footnote">Hold off</span>
-          </article>
-          <article class="telemetry-card accent-green">
-            <span class="telemetry-label">Force</span>
-            <span id="forceValue" class="telemetry-value">0</span>
-            <span id="loadStateValue" class="telemetry-footnote">Load clear</span>
-          </article>
-          <article class="telemetry-card accent-red">
-            <span class="telemetry-label">Safety</span>
-            <span id="stopSourceValue" class="telemetry-value">None</span>
-            <span id="faultValue" class="telemetry-footnote">Fault 0</span>
-          </article>
-          <article class="telemetry-card accent-purple">
-            <span class="telemetry-label">Routine</span>
-            <span id="cycleRemainingValue" class="telemetry-value">0</span>
-            <span id="cycleDoneValue" class="telemetry-footnote">Done 0</span>
-          </article>
-          <article class="telemetry-card accent-slate">
-            <span class="telemetry-label">Driver</span>
-            <span id="driverCurrentValue" class="telemetry-value">--</span>
-            <span id="driverThresholdValue" class="telemetry-footnote">SG --</span>
-          </article>
-          <article class="telemetry-card accent-amber">
-            <span class="telemetry-label">Runtime</span>
-            <span id="loopLastValue" class="telemetry-value">0 us</span>
-            <span id="loopMaxValue" class="telemetry-footnote">Max 0 us</span>
-          </article>
-          <article class="telemetry-card accent-teal">
-            <span class="telemetry-label">Step Cadence</span>
-            <span id="stepTotalValue" class="telemetry-value">0</span>
-            <span id="stepWindowValue" class="telemetry-footnote">HB 0 / Burst 0 / Sync 0</span>
-          </article>
+        <div class="splash-actions">
+          <button id="connectButton" class="primary-button">Connect Serial</button>
         </div>
       </section>
 
-      <section class="panel chart-panel span-2">
-        <div class="panel-header">
-          <h2>Live Telemetry</h2>
-          <div class="panel-actions">
-            <button id="clearChartButton" class="chip-button">Clear chart</button>
+      <div id="liveWorkspace" class="live-workspace">
+        <section class="view-summary panel">
+          <p id="currentViewEyebrow" class="eyebrow">Overview</p>
+          <div class="view-summary-header">
+            <div>
+              <h2 id="currentViewTitle">Overview</h2>
+              <p id="currentViewDescription" class="helper-copy">Live machine state, charts, and bench telemetry at a glance.</p>
+            </div>
+            <div class="view-pill-row">
+              <span class="pill" id="summaryForcePill">Force 0</span>
+              <span class="pill" id="summaryStatePill">Load clear</span>
+            </div>
           </div>
-        </div>
-        <canvas id="telemetryChart" width="960" height="320" aria-label="Live force and position chart"></canvas>
-      </section>
+        </section>
 
-      <section class="panel chart-panel span-2">
-        <div class="panel-header">
-          <h2>Load Cell Scope</h2>
-          <div class="panel-actions">
-            <button id="clearLoadCellChartButton" class="chip-button">Clear scope</button>
+        <section id="overviewView" class="dashboard-view is-active" data-view="overview">
+        <section class="panel state-panel span-2">
+          <div class="panel-header">
+            <h2>Machine State</h2>
+            <div class="panel-actions">
+              <button data-command="status" class="chip-button command-chip">Status</button>
+              <button data-command="safety" class="chip-button command-chip">Safety</button>
+              <button data-command="driver" class="chip-button command-chip">Driver</button>
+            </div>
           </div>
-        </div>
-        <p id="loadCellSummary" class="helper-copy">The live scope plots raw HX711 samples against the active threshold so you can squeeze the cell by hand and watch trigger events in real time.</p>
-        <div class="load-cell-meta" aria-label="Current load cell details">
-          <article class="load-cell-chip">
-            <span class="load-cell-chip-label">Source</span>
-            <strong id="loadCellSourceValue" class="load-cell-chip-value">--</strong>
-          </article>
-          <article class="load-cell-chip">
-            <span class="load-cell-chip-label">Current Raw</span>
-            <strong id="loadCellRawValue" class="load-cell-chip-value">0</strong>
-          </article>
-          <article class="load-cell-chip">
-            <span class="load-cell-chip-label">Threshold</span>
-            <strong id="loadCellThresholdValue" class="load-cell-chip-value">0</strong>
-          </article>
-          <article class="load-cell-chip">
-            <span class="load-cell-chip-label">Peak</span>
-            <strong id="loadCellPeakValue" class="load-cell-chip-value">0</strong>
-          </article>
-          <article class="load-cell-chip">
-            <span class="load-cell-chip-label">Trigger</span>
-            <strong id="loadCellTriggerValue" class="load-cell-chip-value">Clear</strong>
-          </article>
-        </div>
-        <canvas id="loadCellChart" width="960" height="320" aria-label="Live load cell raw sample chart"></canvas>
-      </section>
-
-      <section class="panel chart-panel span-2">
-        <div class="panel-header">
-          <h2>Simulated Response Curve</h2>
-          <div class="panel-actions">
-            <button id="loadSimulatedCurveButton" class="chip-button">Load exported curve</button>
-            <button id="clearResponseCurveButton" class="chip-button">Clear curve</button>
+          <div class="telemetry-cards">
+            <article class="telemetry-card accent-sand">
+              <span class="telemetry-label">Position</span>
+              <span id="positionValue" class="telemetry-value">0</span>
+              <span id="targetValue" class="telemetry-footnote">Target 0</span>
+            </article>
+            <article class="telemetry-card accent-blue">
+              <span class="telemetry-label">Home / Hold</span>
+              <span id="homedValue" class="telemetry-value">No</span>
+              <span id="holdValue" class="telemetry-footnote">Hold off</span>
+            </article>
+            <article class="telemetry-card accent-green">
+              <span class="telemetry-label">Force</span>
+              <span id="forceValue" class="telemetry-value">0</span>
+              <span id="loadStateValue" class="telemetry-footnote">Load 0 / Mech 0 / Stall 0</span>
+            </article>
+            <article class="telemetry-card accent-red">
+              <span class="telemetry-label">Safety</span>
+              <span id="stopSourceValue" class="telemetry-value">None</span>
+              <span id="faultValue" class="telemetry-footnote">Fault 0</span>
+            </article>
+            <article class="telemetry-card accent-purple">
+              <span class="telemetry-label">Routine</span>
+              <span id="cycleRemainingValue" class="telemetry-value">0</span>
+              <span id="cycleDoneValue" class="telemetry-footnote">Done 0</span>
+            </article>
+            <article class="telemetry-card accent-slate">
+              <span class="telemetry-label">Driver</span>
+              <span id="driverCurrentValue" class="telemetry-value">--</span>
+              <span id="driverThresholdValue" class="telemetry-footnote">SG -- / UART --</span>
+            </article>
+            <article class="telemetry-card accent-amber">
+              <span class="telemetry-label">Runtime</span>
+              <span id="loopLastValue" class="telemetry-value">0 us</span>
+              <span id="loopMaxValue" class="telemetry-footnote">Max 0 us</span>
+            </article>
+            <article class="telemetry-card accent-teal">
+              <span class="telemetry-label">Step Cadence</span>
+              <span id="stepTotalValue" class="telemetry-value">0</span>
+              <span id="stepWindowValue" class="telemetry-footnote">HB 0 / Burst 0 / Sync 0</span>
+            </article>
           </div>
-        </div>
-        <p id="responseCurveSummary" class="helper-copy">Run <code>test\run_simulated_probe_workflow.ps1</code>, then load the exported curve here to preview the simulated switch/load-cell response before hardware hookup.</p>
-        <canvas id="responseCurveChart" width="960" height="320" aria-label="Simulated force versus position response curve"></canvas>
-      </section>
+        </section>
 
-      <section class="panel controls-panel">
-        <div class="panel-header">
-          <h2>Motion Controls</h2>
-        </div>
-        <div class="button-grid">
-          <button data-command="home" class="primary-button command-chip">Home</button>
-          <button data-command="backoff" class="secondary-button command-chip">Backoff</button>
-          <button data-command="stop" class="danger-button command-chip">Stop</button>
-          <button data-command="enable" class="secondary-button command-chip">Enable</button>
-          <button data-command="disable" class="secondary-button command-chip">Disable</button>
-          <button data-command="hold on" class="secondary-button command-chip">Hold On</button>
-          <button data-command="hold off" class="secondary-button command-chip">Hold Off</button>
-          <button data-command="setpos 0" class="secondary-button command-chip">Set Pos 0</button>
-        </div>
-        <form id="moveForm" class="stack-form">
-          <label>
-            Absolute move
-            <div class="inline-form-row">
-              <input id="moveAbsoluteInput" type="number" value="20" step="1">
-              <button type="submit" class="primary-button">Send G0</button>
+        <section class="panel chart-panel span-2">
+          <div class="panel-header">
+            <h2>Live Telemetry</h2>
+            <div class="panel-actions">
+              <button id="clearChartButton" class="chip-button">Clear chart</button>
             </div>
-          </label>
-        </form>
-        <form id="moveRelativeForm" class="stack-form">
-          <label>
-            Relative jog
-            <div class="inline-form-row">
-              <input id="moveRelativeInput" type="number" value="-10" step="1">
-              <button type="submit" class="secondary-button">Jog</button>
-            </div>
-          </label>
-        </form>
-        <form id="routineForm" class="stack-form">
-          <label>
-            Press target
-            <div class="inline-form-row">
-              <input id="pressTargetInput" type="number" value="40" step="1">
-              <button type="button" id="setPressTargetButton" class="secondary-button">Apply</button>
-            </div>
-          </label>
-          <label>
-            Cycle count
-            <div class="inline-form-row">
-              <input id="cycleCountInput" type="number" value="25" min="1" step="1">
-              <button type="button" id="startCycleButton" class="primary-button">Start Cycle</button>
-            </div>
-          </label>
-        </form>
-      </section>
-
-      <section class="panel controls-panel">
-        <div class="panel-header">
-          <h2>Driver & Safety</h2>
-        </div>
-        <form id="driverForm" class="stack-form">
-          <label>
-            Run current (IRUN)
-            <div class="inline-form-row">
-              <input id="irunInput" type="number" min="0" max="31" value="5">
-              <button type="button" id="setIrunButton" class="secondary-button">Apply</button>
-            </div>
-          </label>
-          <label>
-            Hold current (IHOLD)
-            <div class="inline-form-row">
-              <input id="iholdInput" type="number" min="0" max="31" value="0">
-              <button type="button" id="setIholdButton" class="secondary-button">Apply</button>
-            </div>
-          </label>
-          <label>
-            Hold delay
-            <div class="inline-form-row">
-              <input id="iholdDelayInput" type="number" min="0" max="15" value="4">
-              <button type="button" id="setIholdDelayButton" class="secondary-button">Apply</button>
-            </div>
-          </label>
-          <label>
-            Stall threshold
-            <div class="inline-form-row">
-              <input id="sgthrsInput" type="number" min="0" max="255" value="4">
-              <button type="button" id="setSgthrsButton" class="secondary-button">Apply</button>
-            </div>
-          </label>
-        </form>
-        <form id="simulationForm" class="stack-form">
-          <label>
-            Simulated load raw
-            <div class="inline-form-row">
-              <input id="simLoadInput" type="number" min="0" value="1200">
-              <button type="button" id="setSimLoadButton" class="secondary-button">Set</button>
-            </div>
-          </label>
-          <label>
-            Simulated load threshold
-            <div class="inline-form-row">
-              <input id="simThresholdInput" type="number" min="0" value="1000">
-              <button type="button" id="setSimThresholdButton" class="secondary-button">Set</button>
-            </div>
-          </label>
-          <div class="button-grid compact-grid">
-            <button type="button" data-command="simmech on" class="chip-button command-chip">Sim Mech On</button>
-            <button type="button" data-command="simmech off" class="chip-button command-chip">Sim Mech Off</button>
-            <button type="button" data-command="simstall on" class="chip-button command-chip">Sim Stall On</button>
-            <button type="button" data-command="simstall off" class="chip-button command-chip">Sim Stall Off</button>
-            <button type="button" data-command="simclear" class="danger-button command-chip">Clear Simulation</button>
           </div>
-        </form>
-      </section>
+          <canvas id="telemetryChart" width="960" height="320" aria-label="Live force and position chart"></canvas>
+        </section>
 
-      <section class="panel macro-panel span-2">
-        <div class="panel-header">
-          <h2>Macro Runner</h2>
-          <div class="panel-actions">
-            <button id="loadRoutinePresetButton" class="chip-button">Load endurance preset</button>
-            <button id="runMacroButton" class="primary-button">Run Macro</button>
-            <button id="stopMacroButton" class="danger-button">Stop Macro</button>
+        <section class="panel chart-panel span-2">
+          <div class="panel-header">
+            <h2>Load Cell Scope</h2>
+            <div class="panel-actions">
+              <button id="clearLoadCellChartButton" class="chip-button">Clear scope</button>
+            </div>
           </div>
-        </div>
-        <p class="helper-copy">Use one command per line. Prefix delays with <code>DELAY 500</code>. Lines beginning with <code>#</code> are comments.</p>
-        <textarea id="macroEditor" rows="10" spellcheck="false"># Example setup
+          <p id="loadCellSummary" class="helper-copy">The live scope plots raw HX711 samples against the active threshold so you can squeeze the cell by hand and watch trigger events in real time.</p>
+          <div class="load-cell-meta" aria-label="Current load cell details">
+            <article class="load-cell-chip">
+              <span class="load-cell-chip-label">Source</span>
+              <strong id="loadCellSourceValue" class="load-cell-chip-value">--</strong>
+            </article>
+            <article class="load-cell-chip">
+              <span class="load-cell-chip-label">Current Raw</span>
+              <strong id="loadCellRawValue" class="load-cell-chip-value">0</strong>
+            </article>
+            <article class="load-cell-chip">
+              <span class="load-cell-chip-label">Threshold</span>
+              <strong id="loadCellThresholdValue" class="load-cell-chip-value">0</strong>
+            </article>
+            <article class="load-cell-chip">
+              <span class="load-cell-chip-label">Peak</span>
+              <strong id="loadCellPeakValue" class="load-cell-chip-value">0</strong>
+            </article>
+            <article class="load-cell-chip">
+              <span class="load-cell-chip-label">Trigger</span>
+              <strong id="loadCellTriggerValue" class="load-cell-chip-value">Clear</strong>
+            </article>
+          </div>
+          <canvas id="loadCellChart" width="960" height="320" aria-label="Live load cell raw sample chart"></canvas>
+        </section>
+        </section>
+
+        <section id="controlsView" class="dashboard-view" data-view="controls">
+        <section class="panel setup-panel span-2">
+          <div class="panel-header">
+            <h2>Setup & Persistence</h2>
+            <div class="panel-actions">
+              <button id="refreshConfigButton" class="chip-button">Refresh Config</button>
+              <button id="saveConfigButton" class="secondary-button">Save</button>
+              <button id="tareButton" class="secondary-button">Tare</button>
+              <button id="rebootButton" class="danger-button">Reboot</button>
+              <button id="bootloaderButton" class="chip-button">Bootloader</button>
+              <button id="resetConfigButton" class="chip-button">Reset Config</button>
+            </div>
+          </div>
+          <div class="setup-summary-grid">
+            <article class="setup-summary-card">
+              <span class="setup-summary-label">Config State</span>
+              <strong id="configStateValue" class="setup-summary-value">Unknown</strong>
+              <span id="configDirtyValue" class="setup-summary-footnote">Dirty -- / Reboot --</span>
+            </article>
+            <article class="setup-summary-card">
+              <span class="setup-summary-label">Load Cell Profile</span>
+              <strong id="configLoadCellProfileValue" class="setup-summary-value">--</strong>
+              <span id="configLoadCellSourceValue" class="setup-summary-footnote">Source --</span>
+            </article>
+            <article class="setup-summary-card">
+              <span class="setup-summary-label">Load Cell Pins</span>
+              <strong id="configLoadCellPinsValue" class="setup-summary-value">-- / --</strong>
+              <span id="configLoadCellThresholdValue" class="setup-summary-footnote">Threshold --</span>
+            </article>
+            <article class="setup-summary-card">
+              <span class="setup-summary-label">Motion Override</span>
+              <strong id="configAllowUnverifiedValue" class="setup-summary-value">--</strong>
+              <span class="setup-summary-footnote">TMC allow unverified motion</span>
+            </article>
+            <article class="setup-summary-card">
+              <span class="setup-summary-label">Panel Color</span>
+              <strong id="configPanelColorValue" class="setup-summary-value">--</strong>
+              <span id="configPanelSwatch" class="panel-color-swatch" aria-label="Configured panel color swatch"></span>
+            </article>
+          </div>
+          <div class="setup-forms-grid">
+            <form id="loadCellConfigForm" class="stack-form">
+              <h3 class="setup-section-title">Load Cell Setup</h3>
+              <label>
+                Connector preset
+                <select id="loadCellConnectorSelect">
+                  <option value="custom">Custom</option>
+                  <option value="skr2_bltouch">SKR2 BLTouch</option>
+                  <option value="skr2_det">SKR2 DET</option>
+                  <option value="skr2_th1">SKR2 TH1</option>
+                  <option value="skr2_th0">SKR2 TH0</option>
+                  <option value="skr2_tb">SKR2 TB</option>
+                </select>
+              </label>
+              <label>
+                Source
+                <select id="loadCellSourceSelect">
+                  <option value="simulation">Simulation</option>
+                  <option value="hx711">HX711</option>
+                  <option value="adc">ADC</option>
+                </select>
+              </label>
+              <label>
+                Threshold
+                <input id="loadCellThresholdInput" type="number" min="1" step="1" value="1000">
+              </label>
+              <label>
+                Data pin
+                <input id="loadCellDataPinInput" type="text" value="PE4" placeholder="PE4">
+              </label>
+              <label>
+                Clock pin
+                <input id="loadCellClockPinInput" type="text" value="PE5" placeholder="PE5">
+              </label>
+              <button type="submit" class="primary-button">Apply Load Cell Config</button>
+            </form>
+            <form id="runtimeConfigForm" class="stack-form">
+              <h3 class="setup-section-title">Runtime & Panel</h3>
+              <label class="toggle-row setup-toggle-row">
+                <input id="allowUnverifiedMotionToggle" type="checkbox">
+                Allow unverified TMC motion
+              </label>
+              <label>
+                Panel color RGB
+                <div class="inline-form-row triple-input-row">
+                  <input id="panelColorRedInput" type="number" min="0" max="255" value="255" aria-label="Panel color red">
+                  <input id="panelColorGreenInput" type="number" min="0" max="255" value="0" aria-label="Panel color green">
+                  <input id="panelColorBlueInput" type="number" min="0" max="255" value="0" aria-label="Panel color blue">
+                </div>
+              </label>
+              <button type="submit" class="secondary-button">Apply Runtime Config</button>
+            </form>
+          </div>
+        </section>
+
+        <section class="panel controls-panel">
+          <div class="panel-header">
+            <h2>Motion Controls</h2>
+          </div>
+          <div class="button-grid">
+            <button data-command="home" class="primary-button command-chip">Home</button>
+            <button data-command="backoff" class="secondary-button command-chip">Backoff</button>
+            <button data-command="stop" class="danger-button command-chip">Stop</button>
+            <button data-command="enable" class="secondary-button command-chip">Enable</button>
+            <button data-command="disable" class="secondary-button command-chip">Disable</button>
+            <button data-command="hold on" class="secondary-button command-chip">Hold On</button>
+            <button data-command="hold off" class="secondary-button command-chip">Hold Off</button>
+            <button data-command="setpos 0" class="secondary-button command-chip">Set Pos 0</button>
+          </div>
+          <form id="moveForm" class="stack-form">
+            <label>
+              Absolute move
+              <div class="inline-form-row">
+                <input id="moveAbsoluteInput" type="number" value="20" step="1">
+                <button type="submit" class="primary-button">Send G0</button>
+              </div>
+            </label>
+          </form>
+          <form id="moveRelativeForm" class="stack-form">
+            <label>
+              Relative jog
+              <div class="inline-form-row">
+                <input id="moveRelativeInput" type="number" value="-10" step="1">
+                <button type="submit" class="secondary-button">Jog</button>
+              </div>
+            </label>
+          </form>
+          <form id="routineForm" class="stack-form">
+            <label>
+              Press target
+              <div class="inline-form-row">
+                <input id="pressTargetInput" type="number" value="40" step="1">
+                <button type="button" id="setPressTargetButton" class="secondary-button">Apply</button>
+              </div>
+            </label>
+            <label>
+              Cycle count
+              <div class="inline-form-row">
+                <input id="cycleCountInput" type="number" value="25" min="1" step="1">
+                <button type="button" id="startCycleButton" class="primary-button">Start Cycle</button>
+              </div>
+            </label>
+          </form>
+        </section>
+
+        <section class="panel controls-panel">
+          <div class="panel-header">
+            <h2>Driver & Safety</h2>
+          </div>
+          <form id="driverForm" class="stack-form">
+            <label>
+              Run current (IRUN)
+              <div class="inline-form-row">
+                <input id="irunInput" type="number" min="0" max="31" value="5">
+                <button type="button" id="setIrunButton" class="secondary-button">Apply</button>
+              </div>
+            </label>
+            <label>
+              Hold current (IHOLD)
+              <div class="inline-form-row">
+                <input id="iholdInput" type="number" min="0" max="31" value="0">
+                <button type="button" id="setIholdButton" class="secondary-button">Apply</button>
+              </div>
+            </label>
+            <label>
+              Hold delay
+              <div class="inline-form-row">
+                <input id="iholdDelayInput" type="number" min="0" max="15" value="4">
+                <button type="button" id="setIholdDelayButton" class="secondary-button">Apply</button>
+              </div>
+            </label>
+            <label>
+              Stall threshold
+              <div class="inline-form-row">
+                <input id="sgthrsInput" type="number" min="0" max="255" value="4">
+                <button type="button" id="setSgthrsButton" class="secondary-button">Apply</button>
+              </div>
+            </label>
+          </form>
+          <form id="simulationForm" class="stack-form">
+            <label>
+              Simulated load raw
+              <div class="inline-form-row">
+                <input id="simLoadInput" type="number" min="0" value="1200">
+                <button type="button" id="setSimLoadButton" class="secondary-button">Set</button>
+              </div>
+            </label>
+            <label>
+              Simulated load threshold
+              <div class="inline-form-row">
+                <input id="simThresholdInput" type="number" min="0" value="1000">
+                <button type="button" id="setSimThresholdButton" class="secondary-button">Set</button>
+              </div>
+            </label>
+            <div class="button-grid compact-grid">
+              <button type="button" data-command="simmech on" class="chip-button command-chip">Sim Mech On</button>
+              <button type="button" data-command="simmech off" class="chip-button command-chip">Sim Mech Off</button>
+              <button type="button" data-command="simstall on" class="chip-button command-chip">Sim Stall On</button>
+              <button type="button" data-command="simstall off" class="chip-button command-chip">Sim Stall Off</button>
+              <button type="button" data-command="simclear" class="danger-button command-chip">Clear Simulation</button>
+            </div>
+          </form>
+        </section>
+        </section>
+
+        <section id="automationView" class="dashboard-view" data-view="automation">
+        <section class="panel chart-panel span-2">
+          <div class="panel-header">
+            <h2>Simulated Response Curve</h2>
+            <div class="panel-actions">
+              <button id="loadSimulatedCurveButton" class="chip-button">Load exported curve</button>
+              <button id="clearResponseCurveButton" class="chip-button">Clear curve</button>
+            </div>
+          </div>
+          <p id="responseCurveSummary" class="helper-copy">Run <code>test\\run_simulated_probe_workflow.ps1</code>, then load the exported curve here to preview the simulated switch/load-cell response before hardware hookup.</p>
+          <canvas id="responseCurveChart" width="960" height="320" aria-label="Simulated force versus position response curve"></canvas>
+        </section>
+
+        <section class="panel macro-panel span-2">
+          <div class="panel-header">
+            <h2>Macro Runner</h2>
+            <div class="panel-actions">
+              <button id="loadRoutinePresetButton" class="chip-button">Load endurance preset</button>
+              <button id="runMacroButton" class="primary-button">Run Macro</button>
+              <button id="stopMacroButton" class="danger-button">Stop Macro</button>
+            </div>
+          </div>
+          <p class="helper-copy">Use one command per line. Prefix delays with <code>DELAY 500</code>. Lines beginning with <code>#</code> are comments.</p>
+          <textarea id="macroEditor" rows="10" spellcheck="false"># Example setup
 driver
 status
 setpos 0
 presspos 40
 cycle 10</textarea>
-      </section>
+        </section>
 
-      <section class="panel log-panel span-2">
-        <div class="panel-header">
-          <h2>Command Console</h2>
-          <div class="panel-actions">
-            <button id="clearLogButton" class="chip-button">Clear log</button>
+        <section class="panel log-panel span-2">
+          <div class="panel-header">
+            <h2>Command Console</h2>
+            <div class="panel-actions">
+              <button id="clearLogButton" class="chip-button">Clear log</button>
+            </div>
           </div>
-        </div>
-        <form id="manualCommandForm" class="console-form">
-          <input id="manualCommandInput" type="text" placeholder="Type a raw command, e.g. g0 x25 or irun 10">
-          <button type="submit" class="primary-button">Send</button>
-        </form>
-        <div id="logOutput" class="log-output" aria-live="polite"></div>
-      </section>
+          <form id="manualCommandForm" class="console-form">
+            <input id="manualCommandInput" type="text" placeholder="Type a raw command, e.g. g0 x25 or irun 10">
+            <button type="submit" class="primary-button">Send</button>
+          </form>
+          <div id="logOutput" class="log-output" aria-live="polite"></div>
+        </section>
+        </section>
+      </div>
     </main>
   </div>
 

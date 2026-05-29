@@ -2,12 +2,14 @@
 
 This is a static browser dashboard for the SKR2 arm firmware. It uses the Web Serial API to connect directly to the board over USB CDC and provides:
 
+- a Fluidd/Mainsail-style shell with a persistent sidebar, view switching, and common command actions
 - live telemetry cards for state, position, force, driver config, and safety inputs
-- a simple force/position chart
+- force/position and live HX711 scope charts on the overview page
+- a controls view for setup, persistence, motion, driver, and simulation tuning
 - a simulated response-curve view loaded from the local host-side probe workflow exporter
-- buttons for common commands (`HOME`, `STOP`, `STATUS`, `SAFETY`, `DRIVER`)
+- system-aware theme selection with manual light/dark override
 - forms for target motion, cycle routines, driver current tuning, and simulation controls
-- a macro editor for scripted command sequences
+- a macro editor plus raw command console for scripted and manual command sequences
 
 ## Run It
 

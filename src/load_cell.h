@@ -14,9 +14,10 @@ struct LoadCellRuntime {
     uint32_t threshold;
     uint8_t mechanicalFallbackOverride;
     uint8_t stallOverride;
+    uint8_t hx711WarmupSamples;
     uint8_t hx711TareSamples;
     uint8_t hx711TareReady;
-    uint16_t reserved0;
+    uint8_t reserved0;
     int32_t hx711Baseline;
     int32_t hx711Accumulator;
 };

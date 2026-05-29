@@ -1993,6 +1993,12 @@ static void refresh_load_cell_input(void)
         return;
     }
 
+    if (pin_read(config.pins.data) != 0U)
+    {
+        g_load_cell_hx711_ready = 0U;
+        return;
+    }
+
     g_load_cell_hx711_ready = 0U;
 
     uint32_t sample = 0U;

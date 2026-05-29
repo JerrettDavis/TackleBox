@@ -143,7 +143,7 @@ void test_load_cell_hx711_auto_tare_and_relative_force(void)
 
     load_cell_apply_config(&runtime, config);
 
-    for (uint32_t index = 0U; index < 16U; ++index)
+    for (uint32_t index = 0U; index < 32U; ++index)
     {
         load_cell_set_hx711_sample(&runtime, 5000);
     }
@@ -156,6 +156,28 @@ void test_load_cell_hx711_auto_tare_and_relative_force(void)
 
     if (load_cell_raw(runtime) == 0U) throw std::runtime_error("hx711 relative force should rise when the sample moves away from baseline");
     if (load_cell_triggered(runtime) != 1U) throw std::runtime_error("hx711 relative force should trigger after stable above-threshold samples");
+}
+
+void test_load_cell_hx711_idle_noise_floor_zeros_small_residuals(void)
+{
+    LoadCellRuntime runtime = load_cell_make_default(1000U);
+    LoadCellConfig config = {};
+    config.source = (uint8_t)LoadCellSourceKind::Hx711;
+    config.threshold = 1000U;
+
+    load_cell_apply_config(&runtime, config);
+
+    for (uint32_t index = 0U; index < 32U; ++index)
+    {
+        load_cell_set_hx711_sample(&runtime, 5000);
+    }
+
+    load_cell_set_hx711_sample(&runtime, 5030);
+    load_cell_set_hx711_sample(&runtime, 4975);
+    load_cell_set_hx711_sample(&runtime, 5025);
+
+    if (load_cell_raw(runtime) != 0U) throw std::runtime_error("small unloaded hx711 residuals should be normalized back to zero");
+    if (load_cell_triggered(runtime) != 0U) throw std::runtime_error("small unloaded hx711 residuals should not trigger the load cell");
 }
 
 void test_load_cell_connector_names_and_profiles(void)
@@ -194,6 +216,7 @@ int main()
     test_load_cell_non_simulation_modes_do_not_reuse_simulated_raw();
     test_load_cell_hx711_decode_and_thresholding();
     test_load_cell_hx711_auto_tare_and_relative_force();
+    test_load_cell_hx711_idle_noise_floor_zeros_small_residuals();
     test_load_cell_connector_names_and_profiles();
     return 0;
 }
