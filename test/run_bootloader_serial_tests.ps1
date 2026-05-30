@@ -46,6 +46,32 @@ function Open-UsbSerialPortWithRetry {
     while ($true)
 }
 
+function Invoke-SerialCommandWithRetry {
+    param(
+        [System.IO.Ports.SerialPort]$Port,
+        [string]$Command,
+        [string[]]$ExpectedPatterns,
+        [int]$WaitMs = 4000,
+        [int]$RetryMs = 250,
+        [switch]$AllowDisconnect
+    )
+
+    $deadline = [Environment]::TickCount + $WaitMs
+    do {
+        try {
+            return Invoke-SerialCommand -Port $Port -Command $Command -ExpectedPatterns $ExpectedPatterns -AllowDisconnect:$AllowDisconnect
+        }
+        catch {
+            if ([Environment]::TickCount -ge $deadline) {
+                throw
+            }
+
+            Start-Sleep -Milliseconds $RetryMs
+        }
+    }
+    while ($true)
+}
+
 $bootPort = $null
 $appPort = $null
 $bootloaderSerial = $null
@@ -123,16 +149,16 @@ try {
         Write-Host "Returned to application port $appPort"
         $appSerial = Open-UsbSerialPortWithRetry -ResolvedPort $appPort -WaitMs $AppWaitMs
         $null = Read-SerialLinesUntilIdle -Port $appSerial -MaxMs 2500
-        $null = Invoke-SerialCommand -Port $appSerial -Command 'status' -ExpectedPatterns @(
+        $null = Invoke-SerialCommandWithRetry -Port $appSerial -Command 'status' -ExpectedPatterns @(
             '^cmd: status$',
             'estop=1'
-        )
-        $null = Invoke-SerialCommand -Port $appSerial -Command 'estopclear' -ExpectedPatterns @(
+        ) -WaitMs $AppWaitMs
+        $null = Invoke-SerialCommandWithRetry -Port $appSerial -Command 'estopclear' -ExpectedPatterns @(
             '^cmd: estop value=0$'
-        )
-        $null = Invoke-SerialCommand -Port $appSerial -Command 'help' -ExpectedPatterns @(
+        ) -WaitMs $AppWaitMs
+        $null = Invoke-SerialCommandWithRetry -Port $appSerial -Command 'help' -ExpectedPatterns @(
             '^cmds: .*BOOTLOADER/RECOVERY.*BOOT/START.*HELP/\?$'
-        )
+        ) -WaitMs $AppWaitMs
         $null = Invoke-SerialCommand -Port $appSerial -Command 'reboot' -ExpectedPatterns @() -AllowDisconnect
         $appSerial.Close()
         $appSerial = $null
