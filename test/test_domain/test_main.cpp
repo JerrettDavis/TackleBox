@@ -255,7 +255,7 @@ void test_domain_cycle_routine_returns_home_and_counts_cycles(void)
     if (keyswitch::setPressTarget(&state, 2, config) != 1U) throw std::runtime_error("setPressTarget should accept a small positive target");
     if (keyswitch::startCycleRoutine(&state, 2U, config) != 1U) throw std::runtime_error("startCycleRoutine should start when homed");
 
-    for (uint32_t i = 0U; i < 8U; ++i)
+    for (uint32_t i = 0U; i < 24U; ++i)
     {
         keyswitch::MotionInputs inputs = make_inputs(40U + i, 1U);
         inputs.stepIssued = 1U;
@@ -272,7 +272,7 @@ void test_domain_cycle_latches_contact_and_keeps_pressing_until_threshold(void)
     keyswitch::MotionState state = keyswitch::makeInitialState(0U);
     keyswitch::MotionConfig config = make_config();
     keyswitch::RuntimeConfig runtime = make_runtime();
-    keyswitch::setCurrentPosition(&state, 0);
+    keyswitch::setCurrentPosition(&state, config.maxPosition);
     if (keyswitch::setPressTarget(&state, 4, config) != 1U) throw std::runtime_error("setPressTarget should accept a probe travel target");
     if (keyswitch::startCycleRoutine(&state, 1U, config) != 1U) throw std::runtime_error("startCycleRoutine should start when homed");
 
@@ -281,7 +281,7 @@ void test_domain_cycle_latches_contact_and_keeps_pressing_until_threshold(void)
     keyswitch::MotionOutputs outputs = keyswitch::tickMotion(&state, inputs, config, runtime);
 
     if (state.probeContactActive != 1U) throw std::runtime_error("cycle press should latch first contact once raw force exceeds the probe threshold");
-    if (state.probeContactPosition != 0) throw std::runtime_error("probe contact should record the position where the first contact sample occurred");
+    if (state.probeContactPosition != config.maxPosition) throw std::runtime_error("probe contact should record the position where the first contact sample occurred");
     if (state.homingState != keyswitch::HomingState::CycleToPress) throw std::runtime_error("first contact should keep the probe pressing toward the full travel target");
     if (outputs.issueStep != 1U) throw std::runtime_error("first contact should continue requesting press steps");
 
@@ -298,6 +298,75 @@ void test_domain_cycle_latches_contact_and_keeps_pressing_until_threshold(void)
     if (outputs.stopSource != keyswitch::StopSource::LoadCell) throw std::runtime_error("threshold stop should report the load cell as the stop source");
 }
 
+void test_domain_cycle_moves_to_workspace_max_before_pressing(void)
+{
+    keyswitch::MotionState state = keyswitch::makeInitialState(0U);
+    keyswitch::MotionConfig config = make_config();
+    keyswitch::RuntimeConfig runtime = make_runtime();
+    keyswitch::setCurrentPosition(&state, 0);
+    if (keyswitch::setPressTarget(&state, 4, config) != 1U) throw std::runtime_error("setPressTarget should accept a probe travel target");
+    if (keyswitch::startCycleRoutine(&state, 1U, config) != 1U) throw std::runtime_error("startCycleRoutine should start when homed");
+    if (state.homingState != keyswitch::HomingState::MoveToTarget) throw std::runtime_error("cycle routine should start with an approach move toward workspace max");
+    if (state.targetPosition != config.maxPosition) throw std::runtime_error("cycle approach should target the workspace maximum before probing");
+
+    for (uint32_t i = 0U; i < 16U; ++i)
+    {
+        keyswitch::MotionInputs inputs = make_inputs(120U + i, 1U);
+        inputs.stepIssued = 1U;
+        keyswitch::tickMotion(&state, inputs, config, runtime);
+        if (state.homingState == keyswitch::HomingState::CycleToPress)
+        {
+            break;
+        }
+    }
+
+    if (state.homingState != keyswitch::HomingState::CycleToPress) throw std::runtime_error("cycle routine should enter the probe press leg after reaching the approach position");
+    if (state.targetPosition != state.pressTargetPosition) throw std::runtime_error("cycle press leg should retarget the configured press position after approach");
+}
+
+void test_domain_cycle_approach_ignores_home_stop_inputs(void)
+{
+    keyswitch::MotionState state = keyswitch::makeInitialState(0U);
+    keyswitch::MotionConfig config = make_config();
+    keyswitch::RuntimeConfig runtime = make_runtime();
+    keyswitch::setCurrentPosition(&state, 0);
+    if (keyswitch::setPressTarget(&state, 4, config) != 1U) throw std::runtime_error("setPressTarget should accept a probe travel target");
+    if (keyswitch::startCycleRoutine(&state, 1U, config) != 1U) throw std::runtime_error("startCycleRoutine should start when homed");
+
+    keyswitch::MotionInputs inputs = make_inputs(140U, 0U);
+    inputs.mechanicalFallbackTriggered = 1U;
+    keyswitch::MotionOutputs outputs = keyswitch::tickMotion(&state, inputs, config, runtime);
+
+    if (state.homingState != keyswitch::HomingState::MoveToTarget) throw std::runtime_error("cycle approach should keep moving away from home while home-side stop inputs are still active");
+    if (state.faultLatch != 0U) throw std::runtime_error("cycle approach should not fault on home-side stop inputs");
+    if (outputs.issueStep != 1U) throw std::runtime_error("cycle approach should continue stepping while home-side stop inputs clear");
+    if (state.currentPosition != 1) throw std::runtime_error("cycle approach should still advance away from home");
+}
+
+void test_domain_cycle_approach_rearms_stop_inputs_after_release(void)
+{
+    keyswitch::MotionState state = keyswitch::makeInitialState(0U);
+    keyswitch::MotionConfig config = make_config();
+    keyswitch::RuntimeConfig runtime = make_runtime();
+    keyswitch::setCurrentPosition(&state, 0);
+    if (keyswitch::setPressTarget(&state, 4, config) != 1U) throw std::runtime_error("setPressTarget should accept a probe travel target");
+    if (keyswitch::startCycleRoutine(&state, 1U, config) != 1U) throw std::runtime_error("startCycleRoutine should start when homed");
+
+    keyswitch::MotionInputs inputs = make_inputs(150U, 1U);
+    inputs.stepIssued = 1U;
+    keyswitch::MotionOutputs outputs = keyswitch::tickMotion(&state, inputs, config, runtime);
+    if (state.cycleApproachStopArmed != 1U) throw std::runtime_error("cycle approach should re-arm stop handling after home-side inputs clear");
+    if (outputs.issueStep != 1U) throw std::runtime_error("cycle approach should keep stepping after stop handling rearms");
+
+    inputs = make_inputs(151U, 0U);
+    inputs.mechanicalFallbackTriggered = 1U;
+    outputs = keyswitch::tickMotion(&state, inputs, config, runtime);
+
+    if (state.homingState != keyswitch::HomingState::CycleToPress) throw std::runtime_error("cycle approach should stop and begin the press leg when a hard stop reappears after release");
+    if (state.faultLatch != 0U) throw std::runtime_error("cycle approach hard stop should not latch a fault");
+    if (outputs.issueStep != 0U) throw std::runtime_error("cycle approach should not issue another outward step on the stop-detection tick");
+}
+
 void test_domain_workspace_range_supports_signed_positions(void)
 {
     keyswitch::MotionState state = keyswitch::makeInitialState(0U);
@@ -310,6 +379,36 @@ void test_domain_workspace_range_supports_signed_positions(void)
     if (keyswitch::queueAbsoluteMove(&state, -5, config) != 0U) throw std::runtime_error("queueAbsoluteMove should reject a target below workspace min");
     if (keyswitch::queueAbsoluteMove(&state, 7, config) != 0U) throw std::runtime_error("queueAbsoluteMove should reject a target above workspace max");
     if (keyswitch::setPressTarget(&state, -2, config) != 1U) throw std::runtime_error("setPressTarget should accept an in-range negative target");
+}
+
+void test_domain_relative_move_clamps_to_workspace_bounds(void)
+{
+    keyswitch::MotionState state = keyswitch::makeInitialState(0U);
+    keyswitch::MotionConfig config = make_config();
+    keyswitch::RuntimeConfig runtime = make_runtime();
+
+    keyswitch::setCurrentPosition(&state, 8);
+    if (keyswitch::queueRelativeMove(&state, -10, config) != 1U) throw std::runtime_error("queueRelativeMove should clamp instead of rejecting a negative overshoot");
+
+    for (uint32_t i = 0U; i < 10U; ++i)
+    {
+        keyswitch::MotionInputs inputs = make_inputs(80U + i, 1U);
+        inputs.stepIssued = 1U;
+        keyswitch::tickMotion(&state, inputs, config, runtime);
+    }
+
+    if (state.currentPosition != 0) throw std::runtime_error("negative overshoot should clamp to the workspace minimum");
+
+    if (keyswitch::queueRelativeMove(&state, 20, config) != 1U) throw std::runtime_error("queueRelativeMove should clamp instead of rejecting a positive overshoot");
+
+    for (uint32_t i = 0U; i < 12U; ++i)
+    {
+        keyswitch::MotionInputs inputs = make_inputs(100U + i, 1U);
+        inputs.stepIssued = 1U;
+        keyswitch::tickMotion(&state, inputs, config, runtime);
+    }
+
+    if (state.currentPosition != config.maxPosition) throw std::runtime_error("positive overshoot should clamp to the workspace maximum");
 }
 
 int main()
@@ -329,7 +428,11 @@ int main()
         test_domain_backoff_clears_fault_after_move_stop();
         test_domain_cycle_routine_returns_home_and_counts_cycles();
         test_domain_cycle_latches_contact_and_keeps_pressing_until_threshold();
+        test_domain_cycle_moves_to_workspace_max_before_pressing();
+        test_domain_cycle_approach_ignores_home_stop_inputs();
+        test_domain_cycle_approach_rearms_stop_inputs_after_release();
         test_domain_workspace_range_supports_signed_positions();
+        test_domain_relative_move_clamps_to_workspace_bounds();
         std::cout << "PASS test_domain" << std::endl;
         return 0;
     }

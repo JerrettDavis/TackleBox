@@ -24,6 +24,8 @@ static void test_protocol_parses_plain_commands_and_aliases()
     require_true(keyswitch::parseCommand("bootloader").type == keyswitch::CommandType::Bootloader, "bootloader should map to Bootloader");
     require_true(keyswitch::parseCommand("recovery").type == keyswitch::CommandType::Bootloader, "recovery should map to Bootloader");
     require_true(keyswitch::parseCommand("boot").type == keyswitch::CommandType::Boot, "boot should map to Boot");
+    require_true(keyswitch::parseCommand("estop").type == keyswitch::CommandType::EmergencyStop, "estop should map to EmergencyStop");
+    require_true(keyswitch::parseCommand("estopclear").type == keyswitch::CommandType::EmergencyClear, "estopclear should map to EmergencyClear");
 }
 
 static void test_protocol_parses_configuration_commands()

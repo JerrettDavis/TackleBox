@@ -43,6 +43,8 @@ enum class CommandType : uint8_t {
     PanelPins,
     Home,
     Stop,
+    EmergencyStop,
+    EmergencyClear,
     Backoff,
     Help,
     Unknown,

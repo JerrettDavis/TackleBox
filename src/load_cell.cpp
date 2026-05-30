@@ -272,6 +272,25 @@ void load_cell_set_raw(LoadCellRuntime *runtime, uint32_t raw)
     }
 }
 
+void load_cell_set_simulated_raw(LoadCellRuntime *runtime, uint32_t raw)
+{
+    if (runtime == 0)
+    {
+        return;
+    }
+
+    if (runtime->source != (uint8_t)LoadCellSourceKind::Hx711)
+    {
+        load_cell_set_raw(runtime, raw);
+        return;
+    }
+
+    for (uint8_t index = 0U; index < kHx711TriggerDebounceCount; ++index)
+    {
+        load_cell_set_raw(runtime, raw);
+    }
+}
+
 void load_cell_set_hx711_sample(LoadCellRuntime *runtime, int32_t sample)
 {
     if (runtime == 0)

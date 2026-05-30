@@ -28,6 +28,7 @@ struct LoadCellRuntime {
 LoadCellRuntime load_cell_make_default(uint32_t threshold);
 void load_cell_apply_config(LoadCellRuntime *runtime, const LoadCellConfig &config);
 void load_cell_set_raw(LoadCellRuntime *runtime, uint32_t raw);
+void load_cell_set_simulated_raw(LoadCellRuntime *runtime, uint32_t raw);
 void load_cell_set_hx711_sample(LoadCellRuntime *runtime, int32_t sample);
 void load_cell_set_threshold(LoadCellRuntime *runtime, uint32_t threshold);
 void load_cell_tare(LoadCellRuntime *runtime);

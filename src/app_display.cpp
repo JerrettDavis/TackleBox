@@ -26,6 +26,8 @@ struct UiState {
     int32_t editValue;
     int32_t jogUm;
     int32_t cycleCount;
+    uint8_t liveJogActive;
+    int32_t liveJogPendingSteps;
     uint8_t initialized;
 };
 
@@ -46,11 +48,11 @@ static uint8_t g_load_graph_samples[60] = {0};
 static uint8_t g_load_graph_head = 0U;
 static uint8_t g_display_flush_page = 0U;
 static uint8_t g_display_frame_pending = 0U;
-static UiState g_ui = {UiScreen::Dashboard, 0U, 0U, 0U, 0U, 0, 1000, 1, 0U};
+static UiState g_ui = {UiScreen::Dashboard, 0U, 0U, 0U, 0U, 0, 1000, 1, 0U, 0, 0U};
 
 static const uint8_t ROOT_ITEM_COUNT = 7U;
-static const uint8_t MOTION_ITEM_COUNT = 10U;
-static const uint8_t MEASURE_ITEM_COUNT = 4U;
+static const uint8_t MOTION_ITEM_COUNT = 11U;
+static const uint8_t MEASURE_ITEM_COUNT = 8U;
 static const uint8_t DRIVER_ITEM_COUNT = 6U;
 static const uint8_t CONFIG_ITEM_COUNT = 11U;
 static const uint8_t MENU_VISIBLE_LINES = 7U;
@@ -518,6 +520,20 @@ static const char *motion_state_label(const keyswitch::MotionState &state)
     }
 }
 
+static const char *stop_source_label(keyswitch::StopSource source)
+{
+    switch (source)
+    {
+    case keyswitch::StopSource::None: return "NONE";
+    case keyswitch::StopSource::LoadCell: return "LOAD";
+    case keyswitch::StopSource::MechanicalFallback: return "MECH";
+    case keyswitch::StopSource::StallGuard: return "STALL";
+    case keyswitch::StopSource::SeekLimitFault: return "SEEK";
+    case keyswitch::StopSource::TravelFault: return "TRAVL";
+    default: return "UNK";
+    }
+}
+
 static uint32_t update_load_display_relative_raw(uint32_t raw, const PersistedFirmwareConfig &config)
 {
     const uint32_t settle_window = ((config.loadCell.threshold > 0U) ? (config.loadCell.threshold / 8U) : 0U) + 16U;
@@ -571,8 +587,18 @@ static void ui_reset_list_position(void)
     g_ui.editing = 0U;
 }
 
+static void ui_cancel_live_jog(void)
+{
+    g_ui.liveJogActive = 0U;
+    g_ui.liveJogPendingSteps = 0;
+}
+
 static void ui_enter_screen(UiScreen screen)
 {
+    if (screen != UiScreen::Motion)
+    {
+        ui_cancel_live_jog();
+    }
     g_ui.screen = screen;
     ui_reset_list_position();
 }
@@ -599,9 +625,10 @@ static int32_t clamp_i32_local(int32_t value, int32_t min_value, int32_t max_val
 static int32_t ui_edit_step(UiScreen screen, uint8_t cursor)
 {
     if ((screen == UiScreen::Motion) && (cursor == 4U)) return 100U;
-    if ((screen == UiScreen::Motion) && (cursor == 7U)) return 100U;
-    if ((screen == UiScreen::Motion) && (cursor == 8U)) return 1U;
+    if ((screen == UiScreen::Motion) && (cursor == 8U)) return 100U;
+    if ((screen == UiScreen::Motion) && (cursor == 9U)) return 1U;
     if ((screen == UiScreen::Measure) && (cursor == 0U)) return 50U;
+    if ((screen == UiScreen::Measure) && (cursor == 1U)) return 1U;
     if ((screen == UiScreen::Driver) && (cursor <= 1U)) return 1U;
     if ((screen == UiScreen::Driver) && (cursor == 2U)) return 1U;
     if ((screen == UiScreen::Driver) && (cursor == 3U)) return 1U;
@@ -616,9 +643,10 @@ static int32_t ui_edit_step(UiScreen screen, uint8_t cursor)
 static int32_t ui_edit_min(UiScreen screen, uint8_t cursor)
 {
     if ((screen == UiScreen::Motion) && (cursor == 4U)) return 100;
-    if ((screen == UiScreen::Motion) && (cursor == 7U)) return 0;
-    if ((screen == UiScreen::Motion) && (cursor == 8U)) return 1;
+    if ((screen == UiScreen::Motion) && (cursor == 8U)) return 0;
+    if ((screen == UiScreen::Motion) && (cursor == 9U)) return 1;
     if ((screen == UiScreen::Measure) && (cursor == 0U)) return 1;
+    if ((screen == UiScreen::Measure) && (cursor == 1U)) return 1;
     if ((screen == UiScreen::Driver) && (cursor <= 1U)) return 0;
     if ((screen == UiScreen::Driver) && (cursor == 2U)) return 0;
     if ((screen == UiScreen::Driver) && (cursor == 3U)) return 0;
@@ -633,9 +661,10 @@ static int32_t ui_edit_min(UiScreen screen, uint8_t cursor)
 static int32_t ui_edit_max(UiScreen screen, uint8_t cursor)
 {
     if ((screen == UiScreen::Motion) && (cursor == 4U)) return 50000;
-    if ((screen == UiScreen::Motion) && (cursor == 7U)) return 50000;
-    if ((screen == UiScreen::Motion) && (cursor == 8U)) return 999;
+    if ((screen == UiScreen::Motion) && (cursor == 8U)) return 50000;
+    if ((screen == UiScreen::Motion) && (cursor == 9U)) return 999;
     if ((screen == UiScreen::Measure) && (cursor == 0U)) return 2000000;
+    if ((screen == UiScreen::Measure) && (cursor == 1U)) return 999;
     if ((screen == UiScreen::Driver) && (cursor <= 1U)) return 31;
     if ((screen == UiScreen::Driver) && (cursor == 2U)) return 15;
     if ((screen == UiScreen::Driver) && (cursor == 3U)) return 255;
@@ -651,9 +680,10 @@ static int32_t ui_current_edit_value(UiScreen screen, uint8_t cursor, const Pers
 {
     const MotionChannelConfig &channel = active_motion_channel(config);
     if ((screen == UiScreen::Motion) && (cursor == 4U)) return g_ui.jogUm;
-    if ((screen == UiScreen::Motion) && (cursor == 7U)) return (int32_t)channel.defaultPressUm;
-    if ((screen == UiScreen::Motion) && (cursor == 8U)) return g_ui.cycleCount;
+    if ((screen == UiScreen::Motion) && (cursor == 8U)) return (int32_t)channel.defaultPressUm;
+    if ((screen == UiScreen::Motion) && (cursor == 9U)) return g_ui.cycleCount;
     if ((screen == UiScreen::Measure) && (cursor == 0U)) return (int32_t)config.loadCell.threshold;
+    if ((screen == UiScreen::Measure) && (cursor == 1U)) return g_ui.cycleCount;
     if ((screen == UiScreen::Driver) && (cursor == 0U)) return (int32_t)channel.tmc2209.irun;
     if ((screen == UiScreen::Driver) && (cursor == 1U)) return (int32_t)channel.tmc2209.ihold;
     if ((screen == UiScreen::Driver) && (cursor == 2U)) return (int32_t)channel.tmc2209.iholddelay;
@@ -682,9 +712,14 @@ static Mini12864UiIntent ui_commit_edit(UiScreen screen, uint8_t cursor, int32_t
         g_ui.jogUm = value;
         return make_intent(Mini12864UiIntentType::None, 0);
     }
-    if ((screen == UiScreen::Motion) && (cursor == 7U)) return make_intent(Mini12864UiIntentType::SetDefaultPressUm, value);
-    if ((screen == UiScreen::Motion) && (cursor == 8U)) return make_intent(Mini12864UiIntentType::StartCycle, value);
+    if ((screen == UiScreen::Motion) && (cursor == 8U)) return make_intent(Mini12864UiIntentType::SetDefaultPressUm, value);
+    if ((screen == UiScreen::Motion) && (cursor == 9U)) return make_intent(Mini12864UiIntentType::StartCycle, value);
     if ((screen == UiScreen::Measure) && (cursor == 0U)) return make_intent(Mini12864UiIntentType::SetLoadThreshold, value);
+    if ((screen == UiScreen::Measure) && (cursor == 1U))
+    {
+        g_ui.cycleCount = value;
+        return make_intent(Mini12864UiIntentType::None, 0);
+    }
     if ((screen == UiScreen::Driver) && (cursor == 0U)) return make_intent(Mini12864UiIntentType::SetIrun, value);
     if ((screen == UiScreen::Driver) && (cursor == 1U)) return make_intent(Mini12864UiIntentType::SetIhold, value);
     if ((screen == UiScreen::Driver) && (cursor == 2U)) return make_intent(Mini12864UiIntentType::SetIholdDelay, value);
@@ -728,19 +763,30 @@ static Mini12864UiIntent ui_click_action(const PersistedFirmwareConfig &config, 
     case UiScreen::Motion:
         switch (g_ui.cursor)
         {
-        case 0U: return make_intent(Mini12864UiIntentType::Home, 0);
-        case 1U: return make_intent(Mini12864UiIntentType::Stop, 0);
-        case 2U: return make_intent(Mini12864UiIntentType::Backoff, 0);
-        case 3U: return make_intent(Mini12864UiIntentType::SetHold, state.holdEnabled == 0U ? 1 : 0);
+        case 0U: ui_cancel_live_jog(); return make_intent(Mini12864UiIntentType::Home, 0);
+        case 1U: ui_cancel_live_jog(); return make_intent(Mini12864UiIntentType::Stop, 0);
+        case 2U: ui_cancel_live_jog(); return make_intent(Mini12864UiIntentType::Backoff, 0);
+        case 3U: ui_cancel_live_jog(); return make_intent(Mini12864UiIntentType::SetHold, state.holdEnabled == 0U ? 1 : 0);
         case 4U:
-        case 7U:
         case 8U:
+        case 9U:
+            ui_cancel_live_jog();
             g_ui.editing = 1U;
             g_ui.editValue = ui_current_edit_value(g_ui.screen, g_ui.cursor, config);
             return make_intent(Mini12864UiIntentType::None, 0);
-        case 5U: return make_intent(Mini12864UiIntentType::MoveRelativeUm, -g_ui.jogUm);
-        case 6U: return make_intent(Mini12864UiIntentType::MoveRelativeUm, g_ui.jogUm);
-        case 9U: ui_enter_screen(UiScreen::Root); return make_intent(Mini12864UiIntentType::None, 0);
+        case 5U:
+            g_ui.liveJogActive = (g_ui.liveJogActive == 0U) ? 1U : 0U;
+            if (g_ui.liveJogActive == 0U)
+            {
+                g_ui.liveJogPendingSteps = 0;
+                return make_intent(Mini12864UiIntentType::None, 0);
+            }
+            return (state.holdEnabled == 0U)
+                       ? make_intent(Mini12864UiIntentType::SetHold, 1)
+                       : make_intent(Mini12864UiIntentType::None, 0);
+        case 6U: ui_cancel_live_jog(); return make_intent(Mini12864UiIntentType::MoveRelativeUm, -g_ui.jogUm);
+        case 7U: ui_cancel_live_jog(); return make_intent(Mini12864UiIntentType::MoveRelativeUm, g_ui.jogUm);
+        case 10U: ui_enter_screen(UiScreen::Root); return make_intent(Mini12864UiIntentType::None, 0);
         default: break;
         }
         return make_intent(Mini12864UiIntentType::None, 0);
@@ -748,14 +794,17 @@ static Mini12864UiIntent ui_click_action(const PersistedFirmwareConfig &config, 
         switch (g_ui.cursor)
         {
         case 0U:
+        case 1U:
             g_ui.editing = 1U;
             g_ui.editValue = ui_current_edit_value(g_ui.screen, g_ui.cursor, config);
             break;
-        case 1U:
+        case 2U:
+            return make_intent(Mini12864UiIntentType::StartCycle, g_ui.cycleCount <= 0 ? 1 : g_ui.cycleCount);
+        case 3U:
             reset_load_display_state();
             return make_intent(Mini12864UiIntentType::Tare, 0);
-        case 2U: return make_intent(Mini12864UiIntentType::Stop, 0);
-        case 3U: ui_enter_screen(UiScreen::Root); break;
+        case 4U: return make_intent(Mini12864UiIntentType::Stop, 0);
+        case 7U: ui_enter_screen(UiScreen::Root); break;
         default: break;
         }
         return make_intent(Mini12864UiIntentType::None, 0);
@@ -817,6 +866,12 @@ static void ui_apply_encoder_delta(int8_t steps, const PersistedFirmwareConfig &
     {
         const int32_t next_value = g_ui.editValue + ((int32_t)steps * ui_edit_step(g_ui.screen, g_ui.cursor));
         g_ui.editValue = clamp_i32_local(next_value, ui_edit_min(g_ui.screen, g_ui.cursor), ui_edit_max(g_ui.screen, g_ui.cursor));
+        return;
+    }
+
+    if ((g_ui.screen == UiScreen::Motion) && (g_ui.cursor == 5U) && (g_ui.liveJogActive != 0U))
+    {
+        g_ui.liveJogPendingSteps = clamp_i32_local(g_ui.liveJogPendingSteps + (int32_t)steps, -64, 64);
         return;
     }
 
@@ -938,11 +993,12 @@ static void ui_menu_text(UiScreen screen, uint8_t item_index, char *buffer, uint
         case 2U: snprintf(buffer, length, "BACKOFF"); break;
         case 3U: snprintf(buffer, length, "HOLD:%u", (unsigned int)state.holdEnabled); break;
         case 4U: snprintf(buffer, length, "JOG UM:%ld", (long)(g_ui.editing != 0U && g_ui.cursor == 4U ? g_ui.editValue : g_ui.jogUm)); break;
-        case 5U: snprintf(buffer, length, "MOVE NEG"); break;
-        case 6U: snprintf(buffer, length, "MOVE POS"); break;
-        case 7U: snprintf(buffer, length, "PRESS:%ld", (long)(g_ui.editing != 0U && g_ui.cursor == 7U ? g_ui.editValue : (int32_t)channel.defaultPressUm)); break;
-        case 8U: snprintf(buffer, length, "CYCLE:%ld", (long)(g_ui.editing != 0U && g_ui.cursor == 8U ? g_ui.editValue : g_ui.cycleCount)); break;
-        case 9U: snprintf(buffer, length, "BACK"); break;
+        case 5U: snprintf(buffer, length, "LIVE:%s H:%u Q:%ld", g_ui.liveJogActive != 0U ? "ON" : "OFF", (unsigned int)state.holdEnabled, (long)g_ui.liveJogPendingSteps); break;
+        case 6U: snprintf(buffer, length, "MOVE NEG"); break;
+        case 7U: snprintf(buffer, length, "MOVE POS"); break;
+        case 8U: snprintf(buffer, length, "PRESS:%ld", (long)(g_ui.editing != 0U && g_ui.cursor == 8U ? g_ui.editValue : (int32_t)channel.defaultPressUm)); break;
+        case 9U: snprintf(buffer, length, "CYCLE:%ld", (long)(g_ui.editing != 0U && g_ui.cursor == 9U ? g_ui.editValue : g_ui.cycleCount)); break;
+        case 10U: snprintf(buffer, length, "BACK"); break;
         default: break;
         }
         break;
@@ -950,9 +1006,22 @@ static void ui_menu_text(UiScreen screen, uint8_t item_index, char *buffer, uint
         switch (item_index)
         {
         case 0U: snprintf(buffer, length, "THRESH:%ld", (long)(g_ui.editing != 0U && g_ui.cursor == 0U ? g_ui.editValue : (int32_t)config.loadCell.threshold)); break;
-        case 1U: snprintf(buffer, length, "TARE ZERO"); break;
-        case 2U: snprintf(buffer, length, "STOP SRC:%u", (unsigned int)state.lastStopSource); break;
-        case 3U: snprintf(buffer, length, "BACK"); break;
+        case 1U: snprintf(buffer, length, "PROBE:%ld", (long)(g_ui.editing != 0U && g_ui.cursor == 1U ? g_ui.editValue : g_ui.cycleCount)); break;
+        case 2U:
+            if ((state.homingState == keyswitch::HomingState::CycleToPress) || (state.homingState == keyswitch::HomingState::CycleToHome))
+            {
+                snprintf(buffer, length, "RUN:%s", motion_state_label(state));
+            }
+            else
+            {
+                snprintf(buffer, length, "RUN PROBE");
+            }
+            break;
+        case 3U: snprintf(buffer, length, "TARE ZERO"); break;
+        case 4U: snprintf(buffer, length, "STOP NOW"); break;
+        case 5U: snprintf(buffer, length, "DONE:%lu LEFT:%lu", (unsigned long)state.completedCycles, (unsigned long)state.cycleCountRemaining); break;
+        case 6U: snprintf(buffer, length, "SRC:%s CT:%ld", stop_source_label(state.lastStopSource), (long)state.probeContactPosition); break;
+        case 7U: snprintf(buffer, length, "BACK"); break;
         default: break;
         }
         break;
@@ -1189,7 +1258,7 @@ void mini12864_display_init(const Mini12864PanelPins &pins)
     g_load_graph_head = 0U;
     g_display_flush_page = 0U;
     g_display_frame_pending = 0U;
-    g_ui = {UiScreen::Dashboard, 0U, 0U, 0U, 0U, 0, 1000, 1, 1U};
+    g_ui = {UiScreen::Dashboard, 0U, 0U, 0U, 0U, 0, 1000, 1, 0U, 0, 1U};
     g_prev_click = 0U;
     g_prev_encoder_state = 0U;
     g_encoder_accumulator = 0;
@@ -1204,15 +1273,16 @@ Mini12864UiIntent mini12864_ui_update(
     (void)config_state;
     if (g_ui.initialized == 0U)
     {
-        g_ui = {UiScreen::Dashboard, 0U, 0U, 0U, 0U, 0, 1000, 1, 1U};
+        g_ui = {UiScreen::Dashboard, 0U, 0U, 0U, 0U, 0, 1000, 1, 0U, 0, 1U};
     }
 
     const int8_t encoder_steps = display_consume_encoder_steps(panel_inputs);
+    const uint8_t click_rising = (uint8_t)(((panel_inputs.clickPressed != 0U) && (g_prev_click == 0U)) ? 1U : 0U);
 
     if ((g_splash_deadline_ms != 0U) &&
         (((int32_t)(HAL_GetTick() - g_splash_deadline_ms) < 0) != 0))
     {
-        if ((encoder_steps != 0) || ((panel_inputs.clickPressed != 0U) && (g_prev_click == 0U)))
+        if ((encoder_steps != 0) || (click_rising != 0U))
         {
             g_splash_deadline_ms = 0U;
         }
@@ -1221,10 +1291,13 @@ Mini12864UiIntent mini12864_ui_update(
     }
 
     g_splash_deadline_ms = 0U;
-    ui_apply_encoder_delta(encoder_steps, config);
+    if (click_rising == 0U)
+    {
+        ui_apply_encoder_delta(encoder_steps, config);
+    }
 
     Mini12864UiIntent intent = {Mini12864UiIntentType::None, 0};
-    if ((panel_inputs.clickPressed != 0U) && (g_prev_click == 0U))
+    if (click_rising != 0U)
     {
         if (g_ui.editing != 0U)
         {
@@ -1235,6 +1308,26 @@ Mini12864UiIntent mini12864_ui_update(
         {
             intent = ui_click_action(config, state);
         }
+    }
+    if ((intent.type == Mini12864UiIntentType::None) &&
+        (g_ui.liveJogActive != 0U) &&
+        (g_ui.screen == UiScreen::Motion) &&
+        (g_ui.cursor == 5U) &&
+        (state.holdEnabled == 0U) &&
+        (g_ui.liveJogPendingSteps != 0))
+    {
+        intent = make_intent(Mini12864UiIntentType::SetHold, 1);
+    }
+    if ((intent.type == Mini12864UiIntentType::None) &&
+        (g_ui.liveJogActive != 0U) &&
+        (g_ui.screen == UiScreen::Motion) &&
+        (g_ui.cursor == 5U) &&
+        (motion_state_busy(state) == 0U) &&
+        (g_ui.liveJogPendingSteps != 0))
+    {
+        const int32_t direction = (g_ui.liveJogPendingSteps > 0) ? 1 : -1;
+        g_ui.liveJogPendingSteps -= direction;
+        intent = make_intent(Mini12864UiIntentType::MoveRelativeUm, direction * g_ui.jogUm);
     }
     g_prev_click = panel_inputs.clickPressed;
     return intent;

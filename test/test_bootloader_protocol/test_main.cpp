@@ -21,6 +21,8 @@ static void test_bootloader_protocol_parses_core_commands()
     require_true(bootloader_parse_command("map").type == BootloaderCommandType::Flash, "map should map to Flash");
     require_true(bootloader_parse_command("boot").type == BootloaderCommandType::Boot, "boot should map to Boot");
     require_true(bootloader_parse_command("reset").type == BootloaderCommandType::Reset, "reset should map to Reset");
+    require_true(bootloader_parse_command("estop").type == BootloaderCommandType::EmergencyStop, "estop should map to EmergencyStop");
+    require_true(bootloader_parse_command("estopclear").type == BootloaderCommandType::EmergencyClear, "estopclear should map to EmergencyClear");
 }
 
 static void test_bootloader_protocol_parses_argument_commands()

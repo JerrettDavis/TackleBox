@@ -199,7 +199,7 @@ try {
     }
 
     $helpLines = Invoke-CommandCheck -Port $port -Command 'help' -ReadMs 1500 -ExpectedPatterns @(
-        ('cmds: .*SAFETY/M122.*CONFIG/CFG.*SET KEY VALUE.*SAVE/SAVECFG.*RESETCFG.*REBOOT.*DRIVER/TMC.*IRUN.*IHOLD.*IHOLDDELAY.*SGTHRS.*ENABLE/M17.*DISABLE/M18/M84.*HOLD.*MOVEABS.*MOVEREL.*SETPOS.*CYCLE.*PRESSPOS.*SIMLOAD.*SIMTHRESH.*SIMMECH.*SIMSTALL.*SIMCLEAR.*HOME/G28.*STOP/M112.*BACKOFF.*HELP/' + [char]3 + '?').Replace([char]3, '?')
+        ('cmds: .*SAFETY/M122.*CONFIG/CFG.*SET KEY VALUE.*SAVE/SAVECFG.*RESETCFG.*REBOOT.*DRIVER/TMC.*IRUN.*IHOLD.*IHOLDDELAY.*SGTHRS.*ENABLE/M17.*DISABLE/M18/M84.*HOLD.*MOVEABS.*MOVEREL.*SETPOS.*CYCLE.*PRESSPOS.*SIMLOAD.*SIMTHRESH.*SIMMECH.*SIMSTALL.*SIMCLEAR.*HOME/G28.*STOP/M112.*ESTOP.*ESTOPCLEAR.*BACKOFF.*HELP/' + [char]3 + '?').Replace([char]3, '?')
     )
 
     $configLines = Invoke-CommandCheck -Port $port -Command 'config' -ReadMs 1500 -ExpectedPatterns @(
@@ -219,17 +219,17 @@ try {
 
     $statusLines = Invoke-CommandCheck -Port $port -Command 'status' -ReadMs 1500 -ExpectedPatterns @(
         'cmd: status',
-        '^diag0=\d+ xstop=\d+ diag2=\d+ pressed=\d+ conf=\d+ load=\d+ mech=\d+ stall=\d+ source=\d+ force=\d+ state=\d+ homed=\d+ hold=\d+ pos=-?\d+ target=-?\d+ press=-?\d+ cycles=\d+ done=\d+ backoff=\d+ seek=\d+ fault=\d+$'
+        '^diag0=\d+ xstop=\d+ diag2=\d+ pressed=\d+ conf=\d+ load=\d+ mech=\d+ stall=\d+ source=\d+ force=\d+ state=\d+ homed=\d+ hold=\d+ pos=-?\d+ target=-?\d+ press=-?\d+ contact_pos=-?\d+ cycles=\d+ done=\d+ probe=\d+ backoff=\d+ seek=\d+ fault=\d+ estop=\d+ ui_click=\d+ ui_a=\d+ ui_b=\d+ loop_last_us=\d+ loop_max_us=\d+ steps_total=\d+ steps_hb=\d+ steps_burst=\d+ tmc_sync=\d+$'
     )
 
     $statusAliasLines = Invoke-CommandCheck -Port $port -Command 'm114' -ReadMs 1500 -ExpectedPatterns @(
         '^cmd: status$',
-        '^diag0=\d+ xstop=\d+ diag2=\d+ pressed=\d+ conf=\d+ load=\d+ mech=\d+ stall=\d+ source=\d+ force=\d+ state=\d+ homed=\d+ hold=\d+ pos=-?\d+ target=-?\d+ press=-?\d+ cycles=\d+ done=\d+ backoff=\d+ seek=\d+ fault=\d+$'
+        '^diag0=\d+ xstop=\d+ diag2=\d+ pressed=\d+ conf=\d+ load=\d+ mech=\d+ stall=\d+ source=\d+ force=\d+ state=\d+ homed=\d+ hold=\d+ pos=-?\d+ target=-?\d+ press=-?\d+ contact_pos=-?\d+ cycles=\d+ done=\d+ probe=\d+ backoff=\d+ seek=\d+ fault=\d+ estop=\d+ ui_click=\d+ ui_a=\d+ ui_b=\d+ loop_last_us=\d+ loop_max_us=\d+ steps_total=\d+ steps_hb=\d+ steps_burst=\d+ tmc_sync=\d+$'
     )
 
     $safetyLines = Invoke-CommandCheck -Port $port -Command 'safety' -ReadMs 1500 -ExpectedPatterns @(
         'cmd: safety',
-        '^diag0=\d+ xstop=\d+ diag2=\d+ pressed=\d+ conf=\d+ load=\d+ mech=\d+ stall=\d+ source=\d+ force=\d+ state=\d+ homed=\d+ hold=\d+ pos=-?\d+ target=-?\d+ press=-?\d+ cycles=\d+ done=\d+ backoff=\d+ seek=\d+ fault=\d+$',
+        '^diag0=\d+ xstop=\d+ diag2=\d+ pressed=\d+ conf=\d+ load=\d+ mech=\d+ stall=\d+ source=\d+ force=\d+ state=\d+ homed=\d+ hold=\d+ pos=-?\d+ target=-?\d+ press=-?\d+ contact_pos=-?\d+ cycles=\d+ done=\d+ probe=\d+ backoff=\d+ seek=\d+ fault=\d+ estop=\d+ ui_click=\d+ ui_a=\d+ ui_b=\d+ loop_last_us=\d+ loop_max_us=\d+ steps_total=\d+ steps_hb=\d+ steps_burst=\d+ tmc_sync=\d+$',
         '^sim source=[^ ]+ raw=\d+ thresh=\d+ load=\d+ mech=\d+ stall=\d+$'
     )
 
@@ -345,38 +345,38 @@ try {
 
     $simThreshLines = Invoke-CommandCheck -Port $port -Command 'simthresh 1000' -ReadMs 1500 -ExpectedPatterns @(
         'cmd: simthresh thresh=1000',
-        '^sim source=[^ ]+ raw=\d+ thresh=1000 load=\d+ mech=\d+ stall=\d+$'
+        '^sim source=hx711 raw=\d+ thresh=1000 load=\d+ mech=\d+ stall=\d+$'
     )
 
     $simLoadLines = Invoke-CommandCheck -Port $port -Command 'simload 1200' -ReadMs 1500 -ExpectedPatterns @(
         'cmd: simload raw=1200',
-        '^sim source=[^ ]+ raw=1200 thresh=1000 load=1 mech=\d+ stall=\d+$'
+        '^sim source=hx711 raw=1200 thresh=1000 load=1 mech=\d+ stall=\d+$'
     )
 
     $simSafetyLines = Invoke-CommandCheck -Port $port -Command 'safety' -ReadMs 1500 -ExpectedPatterns @(
         'cmd: safety',
-        '^diag0=\d+ xstop=\d+ diag2=\d+ pressed=\d+ conf=\d+ load=1 mech=\d+ stall=\d+ source=\d+ force=1200 state=\d+ homed=\d+ hold=\d+ pos=-?\d+ target=-?\d+ press=-?\d+ cycles=\d+ done=\d+ backoff=\d+ seek=\d+ fault=\d+$',
-        '^sim source=[^ ]+ raw=1200 thresh=1000 load=1 mech=\d+ stall=\d+$'
+        '^diag0=\d+ xstop=\d+ diag2=\d+ pressed=\d+ conf=\d+ load=1 mech=\d+ stall=\d+ source=\d+ force=1200 state=\d+ homed=\d+ hold=\d+ pos=-?\d+ target=-?\d+ press=-?\d+ contact_pos=-?\d+ cycles=\d+ done=\d+ probe=\d+ backoff=\d+ seek=\d+ fault=\d+ estop=\d+ ui_click=\d+ ui_a=\d+ ui_b=\d+ loop_last_us=\d+ loop_max_us=\d+ steps_total=\d+ steps_hb=\d+ steps_burst=\d+ tmc_sync=\d+$',
+        '^sim source=hx711 raw=1200 thresh=1000 load=1 mech=\d+ stall=\d+$'
     )
 
     $simMechLines = Invoke-CommandCheck -Port $port -Command 'simmech on' -ReadMs 1500 -ExpectedPatterns @(
         '^cmd: simmech value=1$',
-        '^sim source=[^ ]+ raw=1200 thresh=1000 load=1 mech=1 stall=\d+$'
+        '^sim source=hx711 raw=1200 thresh=1000 load=1 mech=1 stall=\d+$'
     )
 
     $simStallLines = Invoke-CommandCheck -Port $port -Command 'simstall on' -ReadMs 1500 -ExpectedPatterns @(
         '^cmd: simstall value=1$',
-        '^sim source=[^ ]+ raw=1200 thresh=1000 load=1 mech=1 stall=1$'
+        '^sim source=hx711 raw=1200 thresh=1000 load=1 mech=1 stall=1$'
     )
 
     $simSafetyLatchedLines = Invoke-CommandCheck -Port $port -Command 'safety' -ReadMs 1500 -ExpectedPatterns @(
         '^cmd: safety$',
-        '^sim source=[^ ]+ raw=1200 thresh=1000 load=1 mech=1 stall=1$'
+        '^sim source=hx711 raw=1200 thresh=1000 load=1 mech=1 stall=1$'
     )
 
     $simClearLines = Invoke-CommandCheck -Port $port -Command 'simclear' -ReadMs 1500 -ExpectedPatterns @(
         'cmd: simclear',
-        '^sim source=[^ ]+ raw=0 thresh=1000 load=0 mech=0 stall=0$'
+        '^sim source=hx711 raw=0 thresh=1000 load=0 mech=0 stall=0$'
     )
 
     $stopLines = Invoke-CommandCheck -Port $port -Command 'stop' -ReadMs 1500 -ExpectedPatterns @(

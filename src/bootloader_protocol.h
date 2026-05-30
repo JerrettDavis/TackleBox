@@ -16,6 +16,8 @@ enum class BootloaderCommandType : uint8_t {
     Crc,
     Boot,
     Reset,
+    EmergencyStop,
+    EmergencyClear,
     Unknown,
 };
 

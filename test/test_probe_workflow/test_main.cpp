@@ -13,7 +13,7 @@ namespace {
 struct ProbeWorkflowOptions {
     uint32_t threshold = 1000U;
     uint32_t contactDetectRaw = 125U;
-    int32_t pressTarget = 40;
+    int32_t pressTarget = 10;
     uint32_t cycleCount = 3U;
     int32_t contactPosition = 18;
     uint32_t forceSlope = 170U;
@@ -139,7 +139,7 @@ uint32_t simulated_force_raw(
         return 0U;
     }
 
-    const int32_t compression = state.currentPosition - options.contactPosition;
+    const int32_t compression = options.contactPosition - state.currentPosition;
     if (compression <= 0)
     {
         return 0U;
@@ -367,8 +367,8 @@ void test_probe_workflow_completes_requested_cycles_with_load_cell_trips(void)
     require_true(result.contactSamples > 0U, "simulated workflow should enter the fine probe region before the hard threshold trips");
     require_true(result.firstContactPosition >= 0, "simulated workflow should record the first contact position");
     require_true(result.firstTriggerPosition >= 0, "simulated workflow should record the first trigger position");
-    require_true(result.firstContactPosition < result.firstTriggerPosition, "fine probe contact should occur before the hard threshold stop");
-    require_true(result.firstTriggerPosition < options.pressTarget, "threshold trigger should occur before the configured press target");
+    require_true(result.firstContactPosition > result.firstTriggerPosition, "fine probe contact should occur before the hard threshold stop");
+    require_true(result.firstTriggerPosition > options.pressTarget, "threshold trigger should occur before the configured press target is reached");
 }
 
 void test_probe_workflow_produces_curve_samples_for_visualization(void)

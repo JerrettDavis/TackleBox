@@ -3,6 +3,8 @@
 #include "usbd_desc.h"
 #include "usbd_dfu.h"
 
+#include "boot_mode.h"
+
 #include "stm32f4xx_hal.h"
 
 extern "C" {
@@ -20,6 +22,18 @@ USBD_HandleTypeDef hUsbDeviceFS;
 extern "C" void SysTick_Handler(void)
 {
     HAL_IncTick();
+}
+
+extern "C" void HardFault_Handler(void)
+{
+    __disable_irq();
+    bootloader_request_emergency_stop();
+    __DSB();
+    __ISB();
+    NVIC_SystemReset();
+    while (1)
+    {
+    }
 }
 
 extern "C" void OTG_FS_IRQHandler(void)
@@ -164,7 +178,7 @@ int main(void)
         HAL_Delay(1U);
     }
 
-    if (application_present() != 0U)
+    if ((bootloader_emergency_stop_latched() == 0U) && (application_present() != 0U))
     {
         jump_to_application();
     }

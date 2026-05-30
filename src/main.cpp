@@ -21,10 +21,24 @@ static PersistedFirmwareConfig g_persisted_config = {};
 static ConfigRuntimeState g_config_state = {};
 static const Mini12864PanelPins g_panel_pins = mini12864_panel_pins();
 static Mini12864PanelInputs g_panel_inputs = {};
+static uint8_t g_ui_manual_move_active = 0U;
+static uint8_t g_emergency_stop_latched = 0U;
 static volatile uint8_t g_load_cell_hx711_ready = 0U;
 static PinAssignment g_load_cell_hx711_irq_pin = {};
 static uint8_t g_load_cell_hx711_irq_configured = 0U;
 static void configure_load_cell_io(const LoadCellConfig &config);
+
+extern "C" void HardFault_Handler(void)
+{
+    __disable_irq();
+    bootloader_request_emergency_stop();
+    __DSB();
+    __ISB();
+    NVIC_SystemReset();
+    while (1)
+    {
+    }
+}
 
 static void emit_panel_pins_line(void)
 {
@@ -658,6 +672,62 @@ static uint8_t tmc_motion_allowed(void)
     return (x_tmc_verified() != 0U) || (g_persisted_config.allowUnverifiedTmcMotion != 0U);
 }
 
+static void emit_estop_blocked(const char *source)
+{
+    char line[64] = {};
+    const int len = snprintf(line, sizeof(line), "cmd: estop active source=%s\r\n", (source != 0) ? source : "runtime");
+    if (len > 0)
+    {
+        usb_cdc_bridge_write(line, (uint16_t)len);
+    }
+}
+
+static void service_emergency_stop_latch(keyswitch::MotionState *motion_state)
+{
+    if ((motion_state == 0) || (g_emergency_stop_latched == 0U))
+    {
+        return;
+    }
+
+    keyswitch::forceStop(motion_state);
+    keyswitch::setHoldEnabled(motion_state, 0U);
+    g_ui_manual_move_active = 0U;
+}
+
+static uint8_t ui_intent_requires_motion_authority(const Mini12864UiIntent &intent)
+{
+    switch (intent.type)
+    {
+    case Mini12864UiIntentType::Home:
+    case Mini12864UiIntentType::Backoff:
+    case Mini12864UiIntentType::MoveRelativeUm:
+    case Mini12864UiIntentType::StartCycle:
+        return 1U;
+    case Mini12864UiIntentType::SetHold:
+        return (intent.value != 0) ? 1U : 0U;
+    default:
+        return 0U;
+    }
+}
+
+static uint8_t command_requires_motion_authority(const keyswitch::Command &command)
+{
+    switch (command.type)
+    {
+    case keyswitch::CommandType::Enable:
+    case keyswitch::CommandType::MoveAbsolute:
+    case keyswitch::CommandType::MoveRelative:
+    case keyswitch::CommandType::Cycle:
+    case keyswitch::CommandType::Home:
+    case keyswitch::CommandType::Backoff:
+        return 1U;
+    case keyswitch::CommandType::Hold:
+        return (command.value != 0) ? 1U : 0U;
+    default:
+        return 0U;
+    }
+}
+
 static uint8_t motion_state_busy_local(const keyswitch::MotionState &state)
 {
     return ((state.homingState == keyswitch::HomingState::Seek) ||
@@ -919,9 +989,19 @@ static uint32_t active_step_interval_us_for_state(const PersistedFirmwareConfig 
          (motion_state.probeContactActive != 0U))
             ? 1U
             : 0U;
+    const uint8_t use_ui_manual_move_feedrate =
+        ((motion_state.homingState == keyswitch::HomingState::MoveToTarget) && (g_ui_manual_move_active != 0U))
+            ? 1U
+            : 0U;
+    const uint8_t use_cycle_approach_feedrate =
+        ((motion_state.homingState == keyswitch::HomingState::MoveToTarget) && (motion_state.cycleApproachActive != 0U))
+            ? 1U
+            : 0U;
     const uint32_t feedrate_mm_per_min =
         ((motion_state.homingState == keyswitch::HomingState::Seek) ||
          (motion_state.homingState == keyswitch::HomingState::Backoff) ||
+         (use_ui_manual_move_feedrate != 0U) ||
+         (use_cycle_approach_feedrate != 0U) ||
          (use_fine_probe_feedrate != 0U))
             ? channel.homeFeedrateMmPerMin
             : channel.moveFeedrateMmPerMin;
@@ -1759,7 +1839,7 @@ static void emit_status_line(
     int len = snprintf(
         line,
         sizeof(line),
-        "diag0=%lu xstop=%lu diag2=%lu pressed=%lu conf=%lu load=%lu mech=%lu stall=%lu source=%lu force=%lu state=%lu homed=%lu hold=%lu pos=%ld target=%ld press=%ld contact_pos=%ld cycles=%lu done=%lu probe=%lu backoff=%lu seek=%lu fault=%lu ui_click=%lu ui_a=%lu ui_b=%lu loop_last_us=%lu loop_max_us=%lu steps_total=%lu steps_hb=%lu steps_burst=%u tmc_sync=%u\r\n",
+        "diag0=%lu xstop=%lu diag2=%lu pressed=%lu conf=%lu load=%lu mech=%lu stall=%lu source=%lu force=%lu state=%lu homed=%lu hold=%lu pos=%ld target=%ld press=%ld contact_pos=%ld cycles=%lu done=%lu probe=%lu backoff=%lu seek=%lu fault=%lu estop=%u ui_click=%lu ui_a=%lu ui_b=%lu loop_last_us=%lu loop_max_us=%lu steps_total=%lu steps_hb=%lu steps_burst=%u tmc_sync=%u\r\n",
         (unsigned long)inputs.rawDiag0,
         (unsigned long)inputs.rawXStop,
         (unsigned long)inputs.rawDiag2,
@@ -1783,6 +1863,7 @@ static void emit_status_line(
         (unsigned long)state.backoffStepsRemaining,
         (unsigned long)state.seekSteps,
         (unsigned long)state.faultLatch,
+        (unsigned int)g_emergency_stop_latched,
         (unsigned long)g_panel_inputs.clickPressed,
         (unsigned long)g_panel_inputs.encoderAActive,
         (unsigned long)g_panel_inputs.encoderBActive,
@@ -1807,7 +1888,7 @@ static void emit_heartbeat_line(
     int len = snprintf(
         line,
         sizeof(line),
-        "heartbeat count=%lu ms=%lu state=%lu pressed=%lu load=%lu mech=%lu stall=%lu source=%lu homed=%lu hold=%lu pos=%ld target=%ld fault=%lu ui_click=%lu ui_a=%lu ui_b=%lu loop_last_us=%lu loop_max_us=%lu steps_total=%lu steps_hb=%lu steps_burst=%u tmc_sync=%u\r\n",
+        "heartbeat count=%lu ms=%lu state=%lu pressed=%lu load=%lu mech=%lu stall=%lu source=%lu homed=%lu hold=%lu pos=%ld target=%ld fault=%lu estop=%u ui_click=%lu ui_a=%lu ui_b=%lu loop_last_us=%lu loop_max_us=%lu steps_total=%lu steps_hb=%lu steps_burst=%u tmc_sync=%u\r\n",
         (unsigned long)state.heartbeatCount,
         (unsigned long)now_ms,
         (unsigned long)state.homingState,
@@ -1821,6 +1902,7 @@ static void emit_heartbeat_line(
         (long)state.currentPosition,
         (long)state.targetPosition,
         (unsigned long)state.faultLatch,
+        (unsigned int)g_emergency_stop_latched,
         (unsigned long)g_panel_inputs.clickPressed,
         (unsigned long)g_panel_inputs.encoderAActive,
         (unsigned long)g_panel_inputs.encoderBActive,
@@ -1887,6 +1969,12 @@ static void apply_ui_intent(
         return;
     }
 
+    if ((g_emergency_stop_latched != 0U) && (ui_intent_requires_motion_authority(intent) != 0U))
+    {
+        emit_estop_blocked("ui");
+        return;
+    }
+
     char value_buffer[24];
 
     switch (intent.type)
@@ -1917,7 +2005,15 @@ static void apply_ui_intent(
         else
         {
             int32_t delta_steps = axis_steps_from_signed_um(g_persisted_config, intent.value);
-            keyswitch::queueRelativeMove(motion_state, delta_steps, *motion_config);
+            if ((delta_steps < 0) && (motion_state->currentPosition <= motion_config->minPosition))
+            {
+                g_ui_manual_move_active = 0U;
+                keyswitch::startBackoff(motion_state, inputs.nowMs, *motion_config);
+            }
+            else
+            {
+                g_ui_manual_move_active = keyswitch::queueRelativeMove(motion_state, delta_steps, *motion_config);
+            }
         }
         break;
     case Mini12864UiIntentType::SetDefaultPressUm:
@@ -2209,6 +2305,12 @@ int main()
     };
     keyswitch::MotionState motion_state = keyswitch::makeInitialState(HAL_GetTick());
     apply_default_press_target(&motion_state, g_persisted_config, motion_config);
+    g_emergency_stop_latched = bootloader_emergency_stop_latched();
+    if (g_emergency_stop_latched != 0U)
+    {
+        service_emergency_stop_latch(&motion_state);
+        usb_write_str("boot: estop latched\r\n");
+    }
     if (tmc_motion_allowed() == 0U)
     {
         keyswitch::setHoldEnabled(&motion_state, 0U);
@@ -2247,15 +2349,23 @@ int main()
             now_ms,
         };
 
+        g_emergency_stop_latched = bootloader_emergency_stop_latched();
+        service_emergency_stop_latch(&motion_state);
+
         keyswitch::MotionOutputs outputs = keyswitch::tickMotion(
             &motion_state,
             inputs,
             motion_config,
             runtime_config);
 
+        if (motion_state.homingState != keyswitch::HomingState::MoveToTarget)
+        {
+            g_ui_manual_move_active = 0U;
+        }
+
         g_step_scheduler.stepIntervalUs = active_step_interval_us_for_state(g_persisted_config, motion_state);
 
-        if (tmc_motion_allowed() == 0U)
+        if ((tmc_motion_allowed() == 0U) || (g_emergency_stop_latched != 0U))
         {
             outputs.driverEnable = 0U;
             outputs.issueStep = 0U;
@@ -2275,7 +2385,24 @@ int main()
         {
             const keyswitch::Command command = keyswitch::parseCommand(command_buf);
 
-            if ((command.type == keyswitch::CommandType::Status) || (command.type == keyswitch::CommandType::Safety))
+            if ((g_emergency_stop_latched != 0U) && (command_requires_motion_authority(command) != 0U))
+            {
+                emit_estop_blocked("serial");
+            }
+            else if (command.type == keyswitch::CommandType::EmergencyStop)
+            {
+                bootloader_request_emergency_stop();
+                g_emergency_stop_latched = 1U;
+                service_emergency_stop_latch(&motion_state);
+                usb_write_str("cmd: estop value=1\r\n");
+            }
+            else if (command.type == keyswitch::CommandType::EmergencyClear)
+            {
+                bootloader_clear_emergency_stop();
+                g_emergency_stop_latched = 0U;
+                usb_write_str("cmd: estop value=0\r\n");
+            }
+            else if ((command.type == keyswitch::CommandType::Status) || (command.type == keyswitch::CommandType::Safety))
             {
                 usb_write_str((command.type == keyswitch::CommandType::Safety) ? "cmd: safety\r\n" : "cmd: status\r\n");
                 keyswitch::MotionOutputs snapshot = {};
@@ -2577,7 +2704,7 @@ int main()
             else if (command.type == keyswitch::CommandType::SimLoad)
             {
                 char line[64];
-                load_cell_set_raw(&g_load_cell, (uint32_t)command.value);
+                load_cell_set_simulated_raw(&g_load_cell, (uint32_t)command.value);
                 int len = snprintf(line, sizeof(line), "cmd: simload raw=%lu\r\n", (unsigned long)g_load_cell.raw);
                 if (len > 0)
                 {

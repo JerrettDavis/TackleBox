@@ -187,6 +187,14 @@ BootloaderCommand bootloader_parse_command(const char *text)
     {
         command.type = BootloaderCommandType::Reset;
     }
+    else if (same_text(normalized, "ESTOP") || same_text(normalized, "EMERGENCYSTOP"))
+    {
+        command.type = BootloaderCommandType::EmergencyStop;
+    }
+    else if (same_text(normalized, "ESTOPCLEAR") || same_text(normalized, "ESTOPCLR") || same_text(normalized, "EMERGENCYCLEAR"))
+    {
+        command.type = BootloaderCommandType::EmergencyClear;
+    }
     else
     {
         command.type = BootloaderCommandType::Unknown;
@@ -197,5 +205,5 @@ BootloaderCommand bootloader_parse_command(const char *text)
 
 const char *bootloader_command_help_text(void)
 {
-    return "BOOTLOADER HELP: PING HELP INFO STATUS/DIAG FLASH/MAP READ <offset> <size> ERASE <size> WRITE <offset> <hex> CRC <size> BOOT RESET\r\n";
+    return "BOOTLOADER HELP: PING HELP INFO STATUS/DIAG FLASH/MAP READ <offset> <size> ERASE <size> WRITE <offset> <hex> CRC <size> BOOT RESET ESTOP ESTOPCLEAR\r\n";
 }

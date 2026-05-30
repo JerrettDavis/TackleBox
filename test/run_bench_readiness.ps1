@@ -96,7 +96,7 @@ function Assert-StatusPosition {
         [string]$FailureMessage
     )
 
-    $pattern = '^diag0=\d+ xstop=\d+ diag2=\d+ pressed=0 conf=\d+ load=\d+ mech=\d+ stall=\d+ source=\d+ force=\d+ state=2 homed=1 hold=\d+ pos=' + $ExpectedPosition + ' target=' + $ExpectedPosition + ' press=-?\d+ cycles=\d+ done=\d+ backoff=0 seek=\d+ fault=0$'
+    $pattern = '^diag0=\d+ xstop=\d+ diag2=\d+ pressed=0 conf=\d+ load=\d+ mech=\d+ stall=\d+ source=\d+ force=\d+ state=2 homed=1 hold=\d+ pos=' + $ExpectedPosition + ' target=' + $ExpectedPosition + ' press=-?\d+ contact_pos=-?\d+ cycles=\d+ done=\d+ probe=\d+ backoff=0 seek=\d+ fault=0 estop=\d+ ui_click=\d+ ui_a=\d+ ui_b=\d+ loop_last_us=\d+ loop_max_us=\d+ steps_total=\d+ steps_hb=\d+ steps_burst=\d+ tmc_sync=\d+$'
     Assert-ContainsPattern -Lines $Lines -Pattern $pattern -FailureMessage $FailureMessage
 }
 

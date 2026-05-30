@@ -23,6 +23,29 @@ function Assert-ContainsLine {
     }
 }
 
+function Open-UsbSerialPortWithRetry {
+    param(
+        [string]$ResolvedPort,
+        [int]$WaitMs = 4000,
+        [int]$RetryMs = 250
+    )
+
+    $deadline = [Environment]::TickCount + $WaitMs
+    do {
+        try {
+            return Open-UsbSerialPort -ResolvedPort $ResolvedPort
+        }
+        catch {
+            if ([Environment]::TickCount -ge $deadline) {
+                throw
+            }
+
+            Start-Sleep -Milliseconds $RetryMs
+        }
+    }
+    while ($true)
+}
+
 $bootPort = $null
 $appPort = $null
 $bootloaderSerial = $null
@@ -55,7 +78,7 @@ try {
     $null = Read-SerialLinesUntilIdle -Port $bootloaderSerial -MaxMs 2500
 
     $null = Invoke-SerialCommand -Port $bootloaderSerial -Command 'help' -ExpectedPatterns @(
-        '^BOOTLOADER HELP: .*STATUS/DIAG.*FLASH/MAP.*READ <offset> <size>.*ERASE <size>.*WRITE <offset> <hex>.*CRC <size>.*BOOT RESET$'
+        '^BOOTLOADER HELP: .*STATUS/DIAG.*FLASH/MAP.*READ <offset> <size>.*ERASE <size>.*WRITE <offset> <hex>.*CRC <size>.*BOOT RESET ESTOP ESTOPCLEAR$'
     )
 
     $null = Invoke-SerialCommand -Port $bootloaderSerial -Command 'info' -ExpectedPatterns @(
@@ -63,7 +86,19 @@ try {
     )
 
     $null = Invoke-SerialCommand -Port $bootloaderSerial -Command 'status' -ExpectedPatterns @(
-        '^STATUS mode=BOOTLOADER uptime_ms=\d+ usb_configured=[01] app_present=[01]$'
+        '^STATUS mode=BOOTLOADER uptime_ms=\d+ usb_configured=[01] app_present=[01] estop=[01]$'
+    )
+
+    $null = Invoke-SerialCommand -Port $bootloaderSerial -Command 'estop' -ExpectedPatterns @(
+        '^ESTOP value=1$'
+    )
+
+    $null = Invoke-SerialCommand -Port $bootloaderSerial -Command 'status' -ExpectedPatterns @(
+        '^STATUS mode=BOOTLOADER uptime_ms=\d+ usb_configured=[01] app_present=[01] estop=1$'
+    )
+
+    $null = Invoke-SerialCommand -Port $bootloaderSerial -Command 'estopclear' -ExpectedPatterns @(
+        '^ESTOP value=0$'
     )
 
     $null = Invoke-SerialCommand -Port $bootloaderSerial -Command 'flash' -ExpectedPatterns @(
@@ -90,7 +125,7 @@ try {
         }
 
         Write-Host "Returned to application port $appPort"
-        $appSerial = Open-UsbSerialPort -ResolvedPort $appPort
+        $appSerial = Open-UsbSerialPortWithRetry -ResolvedPort $appPort -WaitMs $AppWaitMs
         $null = Read-SerialLinesUntilIdle -Port $appSerial -MaxMs 2500
         $null = Invoke-SerialCommand -Port $appSerial -Command 'help' -ExpectedPatterns @(
             '^cmds: .*BOOTLOADER/RECOVERY.*BOOT/START.*HELP/\?$'

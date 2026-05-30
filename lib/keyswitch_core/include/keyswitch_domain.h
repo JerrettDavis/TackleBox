@@ -71,6 +71,8 @@ struct MotionState {
     int32_t probeContactPosition;
     uint32_t cycleCountRemaining;
     uint32_t completedCycles;
+    uint8_t cycleApproachActive;
+    uint8_t cycleApproachStopArmed;
     uint8_t probeContactActive;
     StopSource lastStopSource;
 };

@@ -178,7 +178,7 @@ try {
     $holdLines = Invoke-ProbeCommand -Port $serial -Command 'hold on' -ExpectedPatterns @('^cmd: hold value=1$')
     $pressLines = Invoke-ProbeCommand -Port $serial -Command ("presspos {0}" -f $PressTargetSteps) -ExpectedPatterns @(("^cmd: presspos pos={0} ok=1$" -f $PressTargetSteps))
     $cycleLines = Invoke-ProbeCommand -Port $serial -Command ("cycle {0}" -f $CycleCount) -ExpectedPatterns @(("^cmd: cycle count={0} ok=1$" -f $CycleCount), 'cycle: complete|heartbeat count=') -MaxMs 20000 -IdleMs 1200
-    $statusLines = Invoke-ProbeCommand -Port $serial -Command 'status' -ExpectedPatterns @('^cmd: status$', '^diag0=\d+ xstop=\d+ diag2=\d+ pressed=\d+ conf=\d+ load=\d+ mech=\d+ stall=\d+ source=\d+ force=\d+ state=\d+ homed=\d+ hold=\d+ pos=-?\d+ target=-?\d+ press=-?\d+ cycles=\d+ done=\d+ backoff=\d+ seek=\d+ fault=\d+ ui_click=\d+ ui_a=\d+ ui_b=\d+ loop_last_us=\d+ loop_max_us=\d+ steps_total=\d+ steps_hb=\d+ steps_burst=\d+ tmc_sync=\d+$')
+    $statusLines = Invoke-ProbeCommand -Port $serial -Command 'status' -ExpectedPatterns @('^cmd: status$', '^diag0=\d+ xstop=\d+ diag2=\d+ pressed=\d+ conf=\d+ load=\d+ mech=\d+ stall=\d+ source=\d+ force=\d+ state=\d+ homed=\d+ hold=\d+ pos=-?\d+ target=-?\d+ press=-?\d+ contact_pos=-?\d+ cycles=\d+ done=\d+ probe=\d+ backoff=\d+ seek=\d+ fault=\d+ estop=\d+ ui_click=\d+ ui_a=\d+ ui_b=\d+ loop_last_us=\d+ loop_max_us=\d+ steps_total=\d+ steps_hb=\d+ steps_burst=\d+ tmc_sync=\d+$')
     $safetyLines = Invoke-ProbeCommand -Port $serial -Command 'safety' -ExpectedPatterns @('^cmd: safety$', '^sim source=[^ ]+ raw=\d+ thresh=\d+ load=\d+ mech=\d+ stall=\d+$')
 
     $null = $thresholdLines

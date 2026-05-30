@@ -22,6 +22,18 @@ extern "C" void SysTick_Handler(void)
     HAL_IncTick();
 }
 
+extern "C" void HardFault_Handler(void)
+{
+    __disable_irq();
+    bootloader_request_emergency_stop();
+    __DSB();
+    __ISB();
+    NVIC_SystemReset();
+    while (1)
+    {
+    }
+}
+
 static uint8_t system_clock_config_hse(void)
 {
     RCC_OscInitTypeDef osc = {0};
@@ -203,11 +215,26 @@ static void service_command(const char *command)
         (void)snprintf(
             line,
             sizeof(line),
-            "STATUS mode=BOOTLOADER uptime_ms=%lu usb_configured=%lu app_present=%lu\r\n",
+            "STATUS mode=BOOTLOADER uptime_ms=%lu usb_configured=%lu app_present=%lu estop=%lu\r\n",
             (unsigned long)HAL_GetTick(),
             (unsigned long)configured,
-            (unsigned long)bootloader_application_present());
+            (unsigned long)bootloader_application_present(),
+            (unsigned long)bootloader_emergency_stop_latched());
         write_line(line);
+        return;
+    }
+
+    if (parsed.type == BootloaderCommandType::EmergencyStop)
+    {
+        bootloader_request_emergency_stop();
+        write_line("ESTOP value=1\r\n");
+        return;
+    }
+
+    if (parsed.type == BootloaderCommandType::EmergencyClear)
+    {
+        bootloader_clear_emergency_stop();
+        write_line("ESTOP value=0\r\n");
         return;
     }
 
@@ -299,6 +326,11 @@ static void service_command(const char *command)
 
     if (parsed.type == BootloaderCommandType::Boot)
     {
+        if (bootloader_emergency_stop_latched() != 0U)
+        {
+            write_line("ERR estop latched\r\n");
+            return;
+        }
         write_line("BOOTING\r\n");
         HAL_Delay(20U);
         if (bootloader_application_present() != 0U)
@@ -325,8 +357,10 @@ int main(void)
 {
     SCB->VTOR = FLASH_BASE | VECT_TAB_OFFSET;
     const uint8_t stay_in_bootloader = bootloader_consume_stay_in_bootloader_request();
+    const uint8_t estop_latched = bootloader_emergency_stop_latched();
 
     if ((bootloader_consume_application_boot_request() != 0U) &&
+        (estop_latched == 0U) &&
         (bootloader_application_present() != 0U))
     {
         bootloader_jump_to_application();
@@ -339,7 +373,11 @@ int main(void)
     }
 
     boot_panel_splash_init();
-    if (stay_in_bootloader != 0U)
+    if (estop_latched != 0U)
+    {
+        boot_panel_splash_show("KEYSWITCH BOOT", "ESTOP LATCHED");
+    }
+    else if (stay_in_bootloader != 0U)
     {
         boot_panel_splash_show("KEYSWITCH BOOT", "HOLDING FOR USB");
     }
@@ -359,6 +397,7 @@ int main(void)
     {
         if ((auto_boot_armed != 0U) &&
             ((int32_t)(HAL_GetTick() - auto_boot_deadline_ms) >= 0) &&
+            (bootloader_emergency_stop_latched() == 0U) &&
             (bootloader_application_present() != 0U))
         {
             boot_panel_splash_show("KEYSWITCH BOOT", "STARTING APP");

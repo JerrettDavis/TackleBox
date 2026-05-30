@@ -468,6 +468,14 @@ Command parseCommand(const char *text)
     {
         command.type = CommandType::Stop;
     }
+    else if (same_text(normalized, "ESTOP") || same_text(normalized, "EMERGENCYSTOP"))
+    {
+        command.type = CommandType::EmergencyStop;
+    }
+    else if (same_text(normalized, "ESTOPCLEAR") || same_text(normalized, "ESTOPCLR") || same_text(normalized, "EMERGENCYCLEAR"))
+    {
+        command.type = CommandType::EmergencyClear;
+    }
     else if (same_text(normalized, "BACKOFF"))
     {
         command.type = CommandType::Backoff;
@@ -486,7 +494,7 @@ Command parseCommand(const char *text)
 
 const char *commandHelpText()
 {
-    return "cmds: STATUS/M114/M119 SAFETY/M122 CONFIG/CFG [KEY] SET KEY VALUE SAVE/SAVECFG RESETCFG REBOOT BOOTLOADER/RECOVERY BOOT/START DRIVER/TMC IRUN n IHOLD n IHOLDDELAY n SGTHRS n ENABLE/M17 DISABLE/M18/M84 HOLD on|off MOVEABS steps|G0 Xmm MOVEREL steps|JOG steps SETPOS n CYCLE n PRESSPOS n SIMLOAD n SIMTHRESH n SIMMECH on|off SIMSTALL on|off SIMCLEAR ZERO/TARE PANELPINS/PANEL HOME/G28 STOP/M112 BACKOFF HELP/?\r\n";
+    return "cmds: STATUS/M114/M119 SAFETY/M122 CONFIG/CFG [KEY] SET KEY VALUE SAVE/SAVECFG RESETCFG REBOOT BOOTLOADER/RECOVERY BOOT/START DRIVER/TMC IRUN n IHOLD n IHOLDDELAY n SGTHRS n ENABLE/M17 DISABLE/M18/M84 HOLD on|off MOVEABS steps|G0 Xmm MOVEREL steps|JOG steps SETPOS n CYCLE n PRESSPOS n SIMLOAD n SIMTHRESH n SIMMECH on|off SIMSTALL on|off SIMCLEAR ZERO/TARE PANELPINS/PANEL HOME/G28 STOP/M112 ESTOP ESTOPCLEAR BACKOFF HELP/?\r\n";
 }
 
 } // namespace keyswitch

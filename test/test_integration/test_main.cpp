@@ -204,7 +204,7 @@ void test_integration_cycle_command_completes_press_and_return_home(void)
     require_true(cycle.type == keyswitch::CommandType::Cycle, "CYCLE should parse to Cycle command");
 
     apply_command_to_domain(cycle, &state, config, 3U);
-    tick_until_done(&state, config, runtime, 30U, 16U);
+    tick_until_done(&state, config, runtime, 30U, 32U);
 
     require_true(state.completedCycles == 2U, "cycle command should complete the requested number of cycles");
     require_true(state.currentPosition == 0, "cycle routine should return to home position");
@@ -216,7 +216,7 @@ void test_integration_cycle_command_returns_home_after_load_cell_trip(void)
     keyswitch::RuntimeConfig runtime = make_runtime();
     keyswitch::MotionState state = keyswitch::makeInitialState(0U);
 
-    apply_command_to_domain(keyswitch::parseCommand("SETPOS 0"), &state, config, 1U);
+    apply_command_to_domain(keyswitch::parseCommand("SETPOS 10"), &state, config, 1U);
     apply_command_to_domain(keyswitch::parseCommand("PRESSPOS 4"), &state, config, 2U);
     apply_command_to_domain(keyswitch::parseCommand("CYCLE 1"), &state, config, 3U);
 
@@ -241,7 +241,7 @@ void test_integration_cycle_command_latches_contact_before_hard_stop(void)
     keyswitch::RuntimeConfig runtime = make_runtime();
     keyswitch::MotionState state = keyswitch::makeInitialState(0U);
 
-    apply_command_to_domain(keyswitch::parseCommand("SETPOS 0"), &state, config, 1U);
+    apply_command_to_domain(keyswitch::parseCommand("SETPOS 10"), &state, config, 1U);
     apply_command_to_domain(keyswitch::parseCommand("PRESSPOS 4"), &state, config, 2U);
     apply_command_to_domain(keyswitch::parseCommand("CYCLE 1"), &state, config, 3U);
 

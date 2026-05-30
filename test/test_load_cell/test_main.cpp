@@ -53,6 +53,24 @@ void test_load_cell_hx711_trigger_requires_stable_samples(void)
     if (load_cell_triggered(runtime) != 0U) throw std::runtime_error("third below-threshold hx711 sample should clear the trigger");
 }
 
+void test_load_cell_simulated_raw_stabilizes_hx711_state(void)
+{
+    LoadCellRuntime runtime = load_cell_make_default(1000U);
+    LoadCellConfig config = {};
+    config.source = (uint8_t)LoadCellSourceKind::Hx711;
+    config.threshold = 1000U;
+
+    load_cell_apply_config(&runtime, config);
+
+    load_cell_set_simulated_raw(&runtime, 1200U);
+    if (load_cell_raw(runtime) != 1200U) throw std::runtime_error("simulated hx711 raw should be applied");
+    if (load_cell_triggered(runtime) != 1U) throw std::runtime_error("simulated hx711 raw should settle above threshold in one command");
+
+    load_cell_set_simulated_raw(&runtime, 0U);
+    if (load_cell_raw(runtime) != 0U) throw std::runtime_error("simulated hx711 clear should reset raw");
+    if (load_cell_triggered(runtime) != 0U) throw std::runtime_error("simulated hx711 clear should settle below threshold in one command");
+}
+
 void test_load_cell_clear_preserves_threshold_and_clears_overrides(void)
 {
     LoadCellRuntime runtime = load_cell_make_default(1000U);
@@ -344,6 +362,7 @@ int main()
     test_load_cell_defaults_to_zero_raw_and_configured_threshold();
     test_load_cell_triggers_when_raw_reaches_threshold();
     test_load_cell_hx711_trigger_requires_stable_samples();
+    test_load_cell_simulated_raw_stabilizes_hx711_state();
     test_load_cell_clear_preserves_threshold_and_clears_overrides();
     test_load_cell_raw_accessor_tracks_updates();
     test_load_cell_source_names_and_parsing();
