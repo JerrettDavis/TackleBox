@@ -326,11 +326,6 @@ static void service_command(const char *command)
 
     if (parsed.type == BootloaderCommandType::Boot)
     {
-        if (bootloader_emergency_stop_latched() != 0U)
-        {
-            write_line("ERR estop latched\r\n");
-            return;
-        }
         write_line("BOOTING\r\n");
         HAL_Delay(20U);
         if (bootloader_application_present() != 0U)
@@ -360,7 +355,6 @@ int main(void)
     const uint8_t estop_latched = bootloader_emergency_stop_latched();
 
     if ((bootloader_consume_application_boot_request() != 0U) &&
-        (estop_latched == 0U) &&
         (bootloader_application_present() != 0U))
     {
         bootloader_jump_to_application();
@@ -375,7 +369,7 @@ int main(void)
     boot_panel_splash_init();
     if (estop_latched != 0U)
     {
-        boot_panel_splash_show("KEYSWITCH BOOT", "ESTOP LATCHED");
+        boot_panel_splash_show("KEYSWITCH BOOT", "ESTOP SAFE MODE");
     }
     else if (stay_in_bootloader != 0U)
     {
@@ -397,7 +391,6 @@ int main(void)
     {
         if ((auto_boot_armed != 0U) &&
             ((int32_t)(HAL_GetTick() - auto_boot_deadline_ms) >= 0) &&
-            (bootloader_emergency_stop_latched() == 0U) &&
             (bootloader_application_present() != 0U))
         {
             boot_panel_splash_show("KEYSWITCH BOOT", "STARTING APP");

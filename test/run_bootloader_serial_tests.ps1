@@ -97,10 +97,6 @@ try {
         '^STATUS mode=BOOTLOADER uptime_ms=\d+ usb_configured=[01] app_present=[01] estop=1$'
     )
 
-    $null = Invoke-SerialCommand -Port $bootloaderSerial -Command 'estopclear' -ExpectedPatterns @(
-        '^ESTOP value=0$'
-    )
-
     $null = Invoke-SerialCommand -Port $bootloaderSerial -Command 'flash' -ExpectedPatterns @(
         '^FLASH boot_base=0x08000000 boot_size=32768 app_base=0x08008000 flash_end=0x08100000$'
     )
@@ -127,6 +123,13 @@ try {
         Write-Host "Returned to application port $appPort"
         $appSerial = Open-UsbSerialPortWithRetry -ResolvedPort $appPort -WaitMs $AppWaitMs
         $null = Read-SerialLinesUntilIdle -Port $appSerial -MaxMs 2500
+        $null = Invoke-SerialCommand -Port $appSerial -Command 'status' -ExpectedPatterns @(
+            '^cmd: status$',
+            'estop=1'
+        )
+        $null = Invoke-SerialCommand -Port $appSerial -Command 'estopclear' -ExpectedPatterns @(
+            '^cmd: estop value=0$'
+        )
         $null = Invoke-SerialCommand -Port $appSerial -Command 'help' -ExpectedPatterns @(
             '^cmds: .*BOOTLOADER/RECOVERY.*BOOT/START.*HELP/\?$'
         )

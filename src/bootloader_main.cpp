@@ -178,7 +178,7 @@ int main(void)
         HAL_Delay(1U);
     }
 
-    if ((bootloader_emergency_stop_latched() == 0U) && (application_present() != 0U))
+    if (application_present() != 0U)
     {
         jump_to_application();
     }
