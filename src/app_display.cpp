@@ -2,6 +2,7 @@
 
 #include "app_board.h"
 #include "load_cell.h"
+#include "stm32f4xx_hal.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -49,13 +50,16 @@ static uint8_t g_load_graph_head = 0U;
 static uint8_t g_display_flush_page = 0U;
 static uint8_t g_display_frame_pending = 0U;
 static UiState g_ui = {UiScreen::Dashboard, 0U, 0U, 0U, 0U, 0, 1000, 1, 0U, 0, 0U};
+static DisplayValidationReport *g_active_validation_report = 0;
 
 static const uint8_t ROOT_ITEM_COUNT = 7U;
 static const uint8_t MOTION_ITEM_COUNT = 11U;
 static const uint8_t MEASURE_ITEM_COUNT = 8U;
 static const uint8_t DRIVER_ITEM_COUNT = 6U;
 static const uint8_t CONFIG_ITEM_COUNT = 11U;
-static const uint8_t MENU_VISIBLE_LINES = 7U;
+static const uint8_t MENU_VISIBLE_LINES = 6U;
+static const uint8_t MENU_LIST_TOP_Y = 15U;
+static const uint8_t MENU_LINE_HEIGHT = 8U;
 
 static void reset_load_display_state(void)
 {
@@ -147,6 +151,7 @@ static void framebuffer_clear_pixel(uint8_t x, uint8_t y)
 }
 
 static void framebuffer_draw_text(uint8_t x, uint8_t y, const char *text);
+static uint8_t centered_text_x(const char *text);
 
 static void wheel_color(uint8_t phase, uint8_t *red, uint8_t *green, uint8_t *blue)
 {
@@ -265,8 +270,7 @@ static void framebuffer_draw_centered_text(uint8_t y, const char *text)
     }
     else
     {
-        const uint32_t width = length * 6U;
-        x = (uint8_t)((128U - width) / 2U);
+        x = centered_text_x(text);
     }
 
     framebuffer_draw_text(x, y, text);
@@ -313,6 +317,63 @@ static uint8_t text_pixel_width(const char *text)
     }
 
     return (uint8_t)(length * 6U);
+}
+
+static uint8_t centered_text_x(const char *text)
+{
+    const uint8_t width = text_pixel_width(text);
+    return (width >= 126U) ? 0U : (uint8_t)((128U - width) / 2U);
+}
+
+#ifdef KEYSWITCH_HOST_TEST
+static void validation_begin(DisplayValidationReport *report)
+{
+    g_active_validation_report = report;
+    if (report != 0)
+    {
+        display_validation_reset(report);
+    }
+}
+
+static void validation_end(void)
+{
+    g_active_validation_report = 0;
+}
+#endif
+
+static int16_t validation_add_rect(const char *name, uint8_t x, uint8_t y, uint8_t width, uint8_t height, int16_t parent_index, uint8_t allow_overlap)
+{
+    if (g_active_validation_report == 0)
+    {
+        return -1;
+    }
+
+    return display_validation_add_rect(g_active_validation_report, name, x, y, width, height, parent_index, allow_overlap);
+}
+
+static int16_t validation_add_text(const char *name, uint8_t x, uint8_t y, const char *text, int16_t parent_index)
+{
+    return validation_add_rect(name, x, y, text_pixel_width(text), 7U, parent_index, 0U);
+}
+
+static int16_t validation_add_centered_text(const char *name, uint8_t y, const char *text, int16_t parent_index)
+{
+    return validation_add_text(name, centered_text_x(text), y, text, parent_index);
+}
+
+static int16_t validation_add_badge(const char *name, uint8_t x, uint8_t y, const char *text, int16_t parent_index)
+{
+    return validation_add_rect(name, x, y, (uint8_t)(text_pixel_width(text) + 6U), 9U, parent_index, 0U);
+}
+
+static int16_t validation_add_value_box(const char *name, uint8_t x, uint8_t y, uint8_t width, int16_t parent_index)
+{
+    return validation_add_rect(name, x, y, width, 18U, parent_index, 0U);
+}
+
+static uint8_t menu_line_y(uint8_t line_index)
+{
+    return (uint8_t)(MENU_LIST_TOP_Y + (line_index * MENU_LINE_HEIGHT));
 }
 
 static const uint8_t *glyph_for_char(char c)
@@ -449,13 +510,17 @@ static void framebuffer_draw_load_graph(uint8_t x, uint8_t y, uint8_t width, uin
 
 static void framebuffer_draw_dashboard_header(const char *title, const char *status)
 {
+    const int16_t header_group = validation_add_rect("dashboard.header", 0U, 0U, 128U, 12U, -1, 1U);
+    validation_add_badge("dashboard.header.title", 0U, 0U, title, header_group);
     framebuffer_draw_badge(0U, 0U, title, 1U);
     if ((status != 0) && (status[0] != 0))
     {
         const uint8_t status_width = (uint8_t)(text_pixel_width(status) + 6U);
         const uint8_t status_x = (status_width < 126U) ? (uint8_t)(128U - status_width) : 0U;
+        validation_add_badge("dashboard.header.status", status_x, 0U, status, header_group);
         framebuffer_draw_badge(status_x, 0U, status, 0U);
     }
+    validation_add_rect("dashboard.header.rule", 0U, 11U, 128U, 1U, header_group, 0U);
     framebuffer_draw_hline(0U, 11U, 128U);
 }
 
@@ -472,11 +537,11 @@ static void framebuffer_draw_page_dots(uint8_t active_page, uint8_t page_count)
     {
         if (index == active_page)
         {
-            framebuffer_fill_rect(x, 59U, 4U, 4U);
+            framebuffer_fill_rect(x, 60U, 4U, 4U);
         }
         else
         {
-            framebuffer_draw_rect(x, 59U, 4U, 4U);
+            framebuffer_draw_rect(x, 60U, 4U, 4U);
         }
         x = (uint8_t)(x + 6U);
     }
@@ -484,7 +549,7 @@ static void framebuffer_draw_page_dots(uint8_t active_page, uint8_t page_count)
 
 static void framebuffer_draw_menu_line(uint8_t line_index, uint8_t selected, uint8_t editing, const char *text)
 {
-    const uint8_t row_y = (uint8_t)(8U + (line_index * 8U));
+    const uint8_t row_y = menu_line_y(line_index);
     if (selected != 0U)
     {
         framebuffer_fill_rect(0U, row_y, 122U, 8U);
@@ -904,59 +969,90 @@ static void ui_render_dashboard(
     case 0U:
         framebuffer_draw_dashboard_header("LOAD", outputs.loadCellTriggered != 0U ? "TRIP" : "IDLE");
         snprintf(line, sizeof(line), "%lug", (unsigned long)load_estimated_grams);
+        validation_add_value_box("dashboard.load.eq_grams", 0U, 15U, 62U, -1);
         framebuffer_draw_value_box(0U, 15U, 62U, "EQ GRAMS", line);
         snprintf(line, sizeof(line), "%lu", (unsigned long)load_relative_raw);
+        validation_add_value_box("dashboard.load.raw_delta", 66U, 15U, 62U, -1);
         framebuffer_draw_value_box(66U, 15U, 62U, "RAW DELTA", line);
+        validation_add_badge("dashboard.load.home", 0U, 36U, state.homed != 0U ? "HOME" : "UNHOME", -1);
         framebuffer_draw_badge(0U, 36U, state.homed != 0U ? "HOME" : "UNHOME", state.homed != 0U ? 1U : 0U);
+        validation_add_badge("dashboard.load.hold", 44U, 36U, state.holdEnabled != 0U ? "HOLD" : "DRIVE", -1);
         framebuffer_draw_badge(44U, 36U, state.holdEnabled != 0U ? "HOLD" : "DRIVE", state.holdEnabled != 0U ? 1U : 0U);
+        validation_add_badge("dashboard.load.fault", 88U, 36U, state.faultLatch != 0U ? "FAULT" : "ZERO", -1);
         framebuffer_draw_badge(88U, 36U, state.faultLatch != 0U ? "FAULT" : "ZERO", state.faultLatch != 0U ? 1U : 0U);
-        framebuffer_draw_text(0U, 47U, "0G");
-        framebuffer_draw_text(102U, 47U, "100G");
-        framebuffer_draw_load_graph(16U, 44U, 96U, 13U);
+        {
+            const int16_t graph_group = validation_add_rect("dashboard.load.graph_group", 0U, 45U, 128U, 13U, -1, 1U);
+            validation_add_text("dashboard.load.scale_min", 0U, 48U, "0G", graph_group);
+            validation_add_text("dashboard.load.scale_max", 102U, 48U, "100G", graph_group);
+            validation_add_rect("dashboard.load.graph", 16U, 45U, 84U, 13U, graph_group, 0U);
+        }
+        framebuffer_draw_text(0U, 48U, "0G");
+        framebuffer_draw_text(102U, 48U, "100G");
+        framebuffer_draw_load_graph(16U, 45U, 84U, 13U);
+        validation_add_rect("dashboard.load.page_dots", (uint8_t)((128U - ((4U * 6U) - 2U)) / 2U), 60U, (uint8_t)((4U * 6U) - 2U), 4U, -1, 0U);
         framebuffer_draw_page_dots(g_ui.dashboardPage, 4U);
         break;
     case 1U:
         framebuffer_draw_dashboard_header("MOTION", motion_state_label(state));
         snprintf(line, sizeof(line), "%ld", (long)state.pressTargetPosition);
+        validation_add_value_box("dashboard.motion.press", 0U, 15U, 62U, -1);
         framebuffer_draw_value_box(0U, 15U, 62U, "PRESS", line);
         snprintf(line, sizeof(line), "%lu", (unsigned long)channel.moveFeedrateMmPerMin);
+        validation_add_value_box("dashboard.motion.move", 66U, 15U, 62U, -1);
         framebuffer_draw_value_box(66U, 15U, 62U, "MOVE MM", line);
         snprintf(line, sizeof(line), "CYCLE %lu", (unsigned long)state.cycleCountRemaining);
+        validation_add_text("dashboard.motion.cycle", 0U, 38U, line, -1);
         framebuffer_draw_text(0U, 38U, line);
         snprintf(line2, sizeof(line2), "DONE %lu", (unsigned long)state.completedCycles);
+        validation_add_text("dashboard.motion.done", 66U, 38U, line2, -1);
         framebuffer_draw_text(66U, 38U, line2);
         snprintf(line, sizeof(line), "SEEK %lu", (unsigned long)state.seekSteps);
+        validation_add_text("dashboard.motion.seek", 0U, 47U, line, -1);
         framebuffer_draw_text(0U, 47U, line);
         snprintf(line2, sizeof(line2), "BACK %lu", (unsigned long)state.backoffStepsRemaining);
+        validation_add_text("dashboard.motion.back", 66U, 47U, line2, -1);
         framebuffer_draw_text(66U, 47U, line2);
+        validation_add_rect("dashboard.motion.page_dots", (uint8_t)((128U - ((4U * 6U) - 2U)) / 2U), 60U, (uint8_t)((4U * 6U) - 2U), 4U, -1, 0U);
         framebuffer_draw_page_dots(g_ui.dashboardPage, 4U);
         break;
     case 2U:
         framebuffer_draw_dashboard_header("DRIVER", config.allowUnverifiedTmcMotion != 0U ? "UNVER" : "LOCKED");
         snprintf(line, sizeof(line), "%u", (unsigned int)channel.tmc2209.irun);
+        validation_add_value_box("dashboard.driver.irun", 0U, 15U, 40U, -1);
         framebuffer_draw_value_box(0U, 15U, 40U, "IRUN", line);
         snprintf(line, sizeof(line), "%u", (unsigned int)channel.tmc2209.ihold);
+        validation_add_value_box("dashboard.driver.ihold", 44U, 15U, 40U, -1);
         framebuffer_draw_value_box(44U, 15U, 40U, "IHOLD", line);
         snprintf(line, sizeof(line), "%u", (unsigned int)channel.tmc2209.iholddelay);
+        validation_add_value_box("dashboard.driver.delay", 88U, 15U, 40U, -1);
         framebuffer_draw_value_box(88U, 15U, 40U, "DELAY", line);
         snprintf(line, sizeof(line), "%u", (unsigned int)channel.tmc2209.sgthrs);
+        validation_add_value_box("dashboard.driver.sgthrs", 0U, 37U, 62U, -1);
         framebuffer_draw_value_box(0U, 37U, 62U, "SGTHRS", line);
         snprintf(line, sizeof(line), "%u", (unsigned int)config.tmcUartBitUs);
+        validation_add_value_box("dashboard.driver.uart", 66U, 37U, 62U, -1);
         framebuffer_draw_value_box(66U, 37U, 62U, "UART US", line);
+        validation_add_rect("dashboard.driver.page_dots", (uint8_t)((128U - ((4U * 6U) - 2U)) / 2U), 60U, (uint8_t)((4U * 6U) - 2U), 4U, -1, 0U);
         framebuffer_draw_page_dots(g_ui.dashboardPage, 4U);
         break;
     default:
         framebuffer_draw_dashboard_header("CONFIG", config_state.dirty != 0U ? "DIRTY" : "SAVED");
         snprintf(line, sizeof(line), "%lu", (unsigned long)channel.moveFeedrateMmPerMin);
+        validation_add_value_box("dashboard.config.move", 0U, 15U, 62U, -1);
         framebuffer_draw_value_box(0U, 15U, 62U, "MOVE", line);
         snprintf(line, sizeof(line), "%lu", (unsigned long)channel.homeFeedrateMmPerMin);
+        validation_add_value_box("dashboard.config.home", 66U, 15U, 62U, -1);
         framebuffer_draw_value_box(66U, 15U, 62U, "HOME", line);
         snprintf(line, sizeof(line), "BACK %u DEB %u", (unsigned int)config.backoffSteps, (unsigned int)config.stopDebounceCount);
+        validation_add_text("dashboard.config.back_deb", 0U, 39U, line, -1);
         framebuffer_draw_text(0U, 39U, line);
         snprintf(line, sizeof(line), "LOAD %lu", (unsigned long)config.loadCell.threshold);
-        framebuffer_draw_text(0U, 47U, line);
+        validation_add_text("dashboard.config.load", 0U, 46U, line, -1);
+        framebuffer_draw_text(0U, 46U, line);
         snprintf(line, sizeof(line), "RGB %u %u %u", (unsigned int)config.panelColorRed, (unsigned int)config.panelColorGreen, (unsigned int)config.panelColorBlue);
-        framebuffer_draw_text(0U, 55U, line);
+        validation_add_text("dashboard.config.rgb", 0U, 53U, line, -1);
+        framebuffer_draw_text(0U, 53U, line);
+        validation_add_rect("dashboard.config.page_dots", (uint8_t)((128U - ((4U * 6U) - 2U)) / 2U), 60U, (uint8_t)((4U * 6U) - 2U), 4U, -1, 0U);
         framebuffer_draw_page_dots(g_ui.dashboardPage, 4U);
         break;
     }
@@ -1072,6 +1168,7 @@ static void ui_render_menu(UiScreen screen, const PersistedFirmwareConfig &confi
     default: snprintf(title, sizeof(title), "MENU"); break;
     }
     framebuffer_draw_dashboard_header(title, g_ui.editing != 0U ? "EDIT" : "BROWSE");
+    const int16_t list_group = validation_add_rect("menu.list", 0U, MENU_LIST_TOP_Y, 122U, (uint8_t)(MENU_VISIBLE_LINES * MENU_LINE_HEIGHT), -1, 1U);
     const uint8_t item_count = ui_item_count(screen);
     for (uint8_t line_index = 0U; line_index < MENU_VISIBLE_LINES; ++line_index)
     {
@@ -1082,17 +1179,25 @@ static void ui_render_menu(UiScreen screen, const PersistedFirmwareConfig &confi
         }
         char line[22] = {0};
         ui_menu_text(screen, item_index, line, sizeof(line), config, config_state, state, inputs);
+        const uint8_t row_y = menu_line_y(line_index);
+        const int16_t row_rect = validation_add_rect("menu.row", 0U, row_y, 122U, MENU_LINE_HEIGHT, list_group, 0U);
+        if ((g_ui.editing != 0U) && (item_index == g_ui.cursor))
+        {
+            validation_add_badge("menu.row.edit", 103U, row_y, "E", row_rect);
+        }
         framebuffer_draw_menu_line(line_index, item_index == g_ui.cursor ? 1U : 0U, (g_ui.editing != 0U) && (item_index == g_ui.cursor) ? 1U : 0U, line);
     }
 
     if (item_count > MENU_VISIBLE_LINES)
     {
-        const uint8_t rail_y = 15U;
-        const uint8_t rail_height = 41U;
-        const uint8_t thumb_height = 11U;
+        const uint8_t rail_y = MENU_LIST_TOP_Y;
+        const uint8_t rail_height = (uint8_t)(MENU_VISIBLE_LINES * MENU_LINE_HEIGHT);
+        const uint8_t thumb_height = 8U;
         const uint8_t travel = (uint8_t)(rail_height - thumb_height);
         const uint8_t max_scroll = (uint8_t)(item_count - MENU_VISIBLE_LINES);
         const uint8_t thumb_y = (max_scroll == 0U) ? rail_y : (uint8_t)(rail_y + ((uint16_t)g_ui.scroll * travel) / max_scroll);
+        const int16_t rail_rect = validation_add_rect("menu.scroll.rail", 124U, rail_y, 4U, rail_height, -1, 0U);
+        validation_add_rect("menu.scroll.thumb", 125U, (uint8_t)(thumb_y + 1U), 2U, thumb_height, rail_rect, 0U);
         framebuffer_draw_rect(124U, rail_y, 4U, rail_height);
         framebuffer_fill_rect(125U, (uint8_t)(thumb_y + 1U), 2U, thumb_height);
     }
@@ -1103,18 +1208,29 @@ static void ui_render_splash(const PersistedFirmwareConfig &config)
     const MotionChannelConfig &channel = active_motion_channel(config);
     char line[22] = {0};
 
+    const int16_t outer_rect = validation_add_rect("splash.outer", 0U, 0U, 128U, 64U, -1, 0U);
+    const int16_t inner_rect = validation_add_rect("splash.inner", 4U, 4U, 120U, 56U, outer_rect, 0U);
+    validation_add_rect("splash.title", 39U, 4U, (uint8_t)(text_pixel_width("KEYSWITCH") + 6U), 9U, inner_rect, 1U);
+    validation_add_rect("splash.logo", 49U, 8U, 30U, 22U, inner_rect, 0U);
+    validation_add_rect("splash.rule.top", 14U, 34U, 100U, 1U, inner_rect, 0U);
+    validation_add_rect("splash.rule.bottom", 20U, 52U, 88U, 1U, inner_rect, 0U);
     framebuffer_draw_rect(0U, 0U, 128U, 64U);
     framebuffer_draw_rect(4U, 4U, 120U, 56U);
     framebuffer_draw_badge(39U, 4U, "KEYSWITCH", 1U);
     framebuffer_draw_keyswitch_logo(49U, 8U);
     framebuffer_draw_hline(14U, 34U, 100U);
-    framebuffer_draw_hline(20U, 50U, 88U);
-    framebuffer_draw_centered_text(38U, "KEYSWITCH TESTER");
+    framebuffer_draw_hline(20U, 52U, 88U);
+    validation_add_centered_text("splash.subtitle", 36U, "KEYSWITCH TESTER", inner_rect);
+    framebuffer_draw_centered_text(36U, "KEYSWITCH TESTER");
     snprintf(line, sizeof(line), "CHANNEL %s READY", channel.label);
-    framebuffer_draw_centered_text(54U, line);
+    validation_add_centered_text("splash.channel", 53U, line, inner_rect);
+    framebuffer_draw_centered_text(53U, line);
+    validation_add_text("splash.skr2", 10U, 22U, "SKR2", inner_rect);
     framebuffer_draw_text(10U, 22U, "SKR2");
+    validation_add_text("splash.v4", 87U, 22U, "V4", inner_rect);
     framebuffer_draw_text(87U, 22U, "V4");
-    framebuffer_draw_badge(42U, 42U, "TURN OR CLICK", 0U);
+    validation_add_badge("splash.prompt", 22U, 43U, "TURN OR CLICK", inner_rect);
+    framebuffer_draw_badge(22U, 43U, "TURN OR CLICK", 0U);
 }
 
 static void display_flush(const Mini12864PanelPins &pins)
@@ -1376,3 +1492,81 @@ void mini12864_display_render(
 
     display_begin_frame(inputs, state, outputs, config, config_state);
 }
+
+#ifdef KEYSWITCH_HOST_TEST
+void mini12864_display_host_render(
+    Mini12864HostScreen screen,
+    const keyswitch::MotionInputs &inputs,
+    const keyswitch::MotionState &state,
+    const keyswitch::MotionOutputs &outputs,
+    const PersistedFirmwareConfig &config,
+    const ConfigRuntimeState &config_state,
+    Mini12864RenderSnapshot *snapshot)
+{
+    if (snapshot == 0)
+    {
+        return;
+    }
+
+    const UiState saved_ui = g_ui;
+    const uint32_t saved_splash_deadline = g_splash_deadline_ms;
+
+    framebuffer_clear();
+    validation_begin(&snapshot->validation);
+    g_ui.cursor = 0U;
+    g_ui.scroll = 0U;
+    g_ui.editing = 0U;
+
+    switch (screen)
+    {
+    case Mini12864HostScreen::Splash:
+        ui_render_splash(config);
+        break;
+    case Mini12864HostScreen::DashboardLoad:
+        g_ui.screen = UiScreen::Dashboard;
+        g_ui.dashboardPage = 0U;
+        ui_render_dashboard(inputs, state, outputs, config, config_state);
+        break;
+    case Mini12864HostScreen::DashboardMotion:
+        g_ui.screen = UiScreen::Dashboard;
+        g_ui.dashboardPage = 1U;
+        ui_render_dashboard(inputs, state, outputs, config, config_state);
+        break;
+    case Mini12864HostScreen::DashboardDriver:
+        g_ui.screen = UiScreen::Dashboard;
+        g_ui.dashboardPage = 2U;
+        ui_render_dashboard(inputs, state, outputs, config, config_state);
+        break;
+    case Mini12864HostScreen::DashboardConfig:
+        g_ui.screen = UiScreen::Dashboard;
+        g_ui.dashboardPage = 3U;
+        ui_render_dashboard(inputs, state, outputs, config, config_state);
+        break;
+    case Mini12864HostScreen::RootMenu:
+        g_ui.screen = UiScreen::Root;
+        ui_render_menu(g_ui.screen, config, config_state, state, inputs);
+        break;
+    case Mini12864HostScreen::MotionMenu:
+        g_ui.screen = UiScreen::Motion;
+        ui_render_menu(g_ui.screen, config, config_state, state, inputs);
+        break;
+    case Mini12864HostScreen::MeasureMenu:
+        g_ui.screen = UiScreen::Measure;
+        ui_render_menu(g_ui.screen, config, config_state, state, inputs);
+        break;
+    case Mini12864HostScreen::DriverMenu:
+        g_ui.screen = UiScreen::Driver;
+        ui_render_menu(g_ui.screen, config, config_state, state, inputs);
+        break;
+    case Mini12864HostScreen::ConfigMenu:
+        g_ui.screen = UiScreen::Config;
+        ui_render_menu(g_ui.screen, config, config_state, state, inputs);
+        break;
+    }
+
+    memcpy(snapshot->framebuffer, g_framebuffer, sizeof(g_framebuffer));
+    validation_end();
+    g_ui = saved_ui;
+    g_splash_deadline_ms = saved_splash_deadline;
+}
+#endif

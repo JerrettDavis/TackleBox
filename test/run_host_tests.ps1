@@ -96,6 +96,24 @@ $tests = @(
             (Join-Path $root 'src\load_cell.cpp'),
             (Join-Path $PSScriptRoot 'test_probe_workflow\test_main.cpp')
         );
+    },
+    @{
+        Name = 'test_display_render';
+        Sources = @(
+            (Join-Path $root 'src\display_validation.cpp'),
+            (Join-Path $root 'src\load_cell.cpp'),
+            (Join-Path $root 'src\app_runtime_config.cpp'),
+            (Join-Path $root 'src\app_display.cpp'),
+            (Join-Path $root 'src\boot_panel_splash.cpp'),
+            (Join-Path $root 'lib\keyswitch_core\src\keyswitch_protocol.cpp'),
+            (Join-Path $PSScriptRoot 'support\app_runtime_config_host_stubs.cpp'),
+            (Join-Path $PSScriptRoot 'support\display_render_host_stubs.cpp'),
+            (Join-Path $PSScriptRoot 'test_display_render\test_main.cpp')
+        );
+        ExtraArgs = @(
+            '-DKEYSWITCH_HOST_TEST',
+            '-I', $supportInclude
+        );
     }
 )
 

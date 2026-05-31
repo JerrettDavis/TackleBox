@@ -24,6 +24,7 @@ typedef struct {
 #define FLASH_TYPEPROGRAM_WORD 0U
 
 uint32_t HAL_GetTick(void);
+void HAL_Delay(uint32_t delay_ms);
 void HAL_FLASH_Unlock(void);
 void HAL_FLASH_Lock(void);
 HAL_StatusTypeDef HAL_FLASHEx_Erase(FLASH_EraseInitTypeDef *erase, uint32_t *sector_error);

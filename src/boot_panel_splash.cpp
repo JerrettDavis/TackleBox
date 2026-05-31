@@ -29,6 +29,7 @@ static const Mini12864BootPins kPanelPins = {
 
 static uint8_t g_framebuffer[128U * 8U] = {0};
 static uint8_t g_panel_ready = 0U;
+static DisplayValidationReport *g_active_validation_report = 0;
 
 static GPIO_TypeDef *gpio_port_from_id(uint8_t port_id)
 {
@@ -198,6 +199,8 @@ static void framebuffer_draw_vline(uint8_t x, uint8_t y, uint8_t length)
     }
 }
 
+static void framebuffer_draw_keyswitch_logo(uint8_t x, uint8_t y);
+
 static void framebuffer_draw_rect(uint8_t x, uint8_t y, uint8_t width, uint8_t height)
 {
     if ((width == 0U) || (height == 0U))
@@ -298,6 +301,84 @@ static void framebuffer_draw_centered_text(uint8_t y, const char *text)
     }
 
     framebuffer_draw_text(x, y, text);
+}
+
+static uint8_t text_pixel_width(const char *text)
+{
+    uint32_t length = 0U;
+    if (text == 0)
+    {
+        return 0U;
+    }
+
+    while (text[length] != 0)
+    {
+        ++length;
+    }
+
+    return (uint8_t)(length * 6U);
+}
+
+#ifdef KEYSWITCH_HOST_TEST
+static void validation_begin(DisplayValidationReport *report)
+{
+    g_active_validation_report = report;
+    if (report != 0)
+    {
+        display_validation_reset(report);
+    }
+}
+
+static void validation_end(void)
+{
+    g_active_validation_report = 0;
+}
+#endif
+
+static int16_t validation_add_rect(const char *name, uint8_t x, uint8_t y, uint8_t width, uint8_t height, int16_t parent_index, uint8_t allow_overlap)
+{
+    if (g_active_validation_report == 0)
+    {
+        return -1;
+    }
+
+    return display_validation_add_rect(g_active_validation_report, name, x, y, width, height, parent_index, allow_overlap);
+}
+
+static int16_t validation_add_text(const char *name, uint8_t x, uint8_t y, const char *text, int16_t parent_index)
+{
+    return validation_add_rect(name, x, y, text_pixel_width(text), 7U, parent_index, 0U);
+}
+
+static int16_t validation_add_centered_text(const char *name, uint8_t y, const char *text, int16_t parent_index)
+{
+    const uint8_t width = text_pixel_width(text);
+    const uint8_t x = (width < 126U) ? (uint8_t)((128U - width) / 2U) : 0U;
+    return validation_add_text(name, x, y, text, parent_index);
+}
+
+static void render_boot_splash_frame(const char *title, const char *subtitle)
+{
+    const int16_t outer_rect = validation_add_rect("boot.outer", 0U, 0U, 128U, 64U, -1, 0U);
+    const int16_t inner_rect = validation_add_rect("boot.inner", 4U, 4U, 120U, 56U, outer_rect, 0U);
+    validation_add_rect("boot.logo", 49U, 8U, 30U, 22U, inner_rect, 0U);
+    validation_add_rect("boot.rule.top", 14U, 34U, 100U, 1U, inner_rect, 0U);
+    validation_add_rect("boot.rule.bottom", 20U, 50U, 88U, 1U, inner_rect, 0U);
+    validation_add_centered_text("boot.title", 38U, (title != 0) ? title : "BOOT", inner_rect);
+    validation_add_centered_text("boot.subtitle", 52U, (subtitle != 0) ? subtitle : "STARTING", inner_rect);
+    validation_add_text("boot.skr2", 10U, 22U, "SKR2", inner_rect);
+    validation_add_text("boot.key", 81U, 22U, "KEY", inner_rect);
+
+    framebuffer_clear();
+    framebuffer_draw_rect(0U, 0U, 128U, 64U);
+    framebuffer_draw_rect(4U, 4U, 120U, 56U);
+    framebuffer_draw_keyswitch_logo(49U, 8U);
+    framebuffer_draw_hline(14U, 34U, 100U);
+    framebuffer_draw_hline(20U, 50U, 88U);
+    framebuffer_draw_centered_text(38U, (title != 0) ? title : "BOOT");
+    framebuffer_draw_centered_text(52U, (subtitle != 0) ? subtitle : "STARTING");
+    framebuffer_draw_text(10U, 22U, "SKR2");
+    framebuffer_draw_text(81U, 22U, "KEY");
 }
 
 static void framebuffer_fill_rect(uint8_t x, uint8_t y, uint8_t width, uint8_t height)
@@ -426,15 +507,21 @@ void boot_panel_splash_show(const char *title, const char *subtitle)
         return;
     }
 
-    framebuffer_clear();
-    framebuffer_draw_rect(0U, 0U, 128U, 64U);
-    framebuffer_draw_rect(4U, 4U, 120U, 56U);
-    framebuffer_draw_keyswitch_logo(49U, 8U);
-    framebuffer_draw_hline(14U, 34U, 100U);
-    framebuffer_draw_hline(20U, 50U, 88U);
-    framebuffer_draw_centered_text(38U, (title != 0) ? title : "BOOT");
-    framebuffer_draw_centered_text(54U, (subtitle != 0) ? subtitle : "STARTING");
-    framebuffer_draw_text(10U, 22U, "SKR2");
-    framebuffer_draw_text(81U, 22U, "KEY");
+    render_boot_splash_frame(title, subtitle);
     display_flush();
 }
+
+#ifdef KEYSWITCH_HOST_TEST
+void boot_panel_splash_host_render(const char *title, const char *subtitle, BootPanelRenderSnapshot *snapshot)
+{
+    if (snapshot == 0)
+    {
+        return;
+    }
+
+    validation_begin(&snapshot->validation);
+    render_boot_splash_frame(title, subtitle);
+    memcpy(snapshot->framebuffer, g_framebuffer, sizeof(g_framebuffer));
+    validation_end();
+}
+#endif

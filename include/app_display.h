@@ -2,6 +2,7 @@
 #define APP_DISPLAY_H
 
 #include "app_panel.h"
+#include "display_validation.h"
 #include "app_runtime_config.h"
 #include "keyswitch_domain.h"
 
@@ -53,5 +54,34 @@ void mini12864_display_render(
     const Mini12864PanelInputs &panel_inputs,
     const PersistedFirmwareConfig &config,
     const ConfigRuntimeState &config_state);
+
+#ifdef KEYSWITCH_HOST_TEST
+enum class Mini12864HostScreen : uint8_t {
+    Splash = 0,
+    DashboardLoad,
+    DashboardMotion,
+    DashboardDriver,
+    DashboardConfig,
+    RootMenu,
+    MotionMenu,
+    MeasureMenu,
+    DriverMenu,
+    ConfigMenu,
+};
+
+struct Mini12864RenderSnapshot {
+    uint8_t framebuffer[128U * 8U];
+    DisplayValidationReport validation;
+};
+
+void mini12864_display_host_render(
+    Mini12864HostScreen screen,
+    const keyswitch::MotionInputs &inputs,
+    const keyswitch::MotionState &state,
+    const keyswitch::MotionOutputs &outputs,
+    const PersistedFirmwareConfig &config,
+    const ConfigRuntimeState &config_state,
+    Mini12864RenderSnapshot *snapshot);
+#endif
 
 #endif
