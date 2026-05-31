@@ -1,6 +1,7 @@
 param(
     [string]$AppPortName,
     [switch]$SkipUsbFlash,
+    [switch]$IncludeRecovery,
     [switch]$SkipRecovery
 )
 
@@ -28,7 +29,24 @@ if (-not $SkipUsbFlash) {
     }
 }
 
-if (-not $SkipRecovery) {
+$bootValidateTool = Join-Path $PSScriptRoot 'validate-bootanchor.ps1'
+& $bootValidateTool -AppPortName $AppPortName
+if ($LASTEXITCODE -ne 0) {
+	exit $LASTEXITCODE
+}
+
+$runtimeValidateTool = Join-Path $PSScriptRoot 'validate-runtime.ps1'
+if ($AppPortName) {
+	& $runtimeValidateTool -PortName $AppPortName
+}
+else {
+	& $runtimeValidateTool
+}
+if ($LASTEXITCODE -ne 0) {
+	exit $LASTEXITCODE
+}
+
+if ($IncludeRecovery -and (-not $SkipRecovery)) {
     $recoverTool = Join-Path $PSScriptRoot 'recover-app.ps1'
     & $recoverTool
         if ($LASTEXITCODE -ne 0) {

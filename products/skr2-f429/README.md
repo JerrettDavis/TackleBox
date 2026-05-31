@@ -154,7 +154,7 @@ The current release-quality validation for this reference product is:
 4. `test/run_bootloader_serial_tests.ps1`
 5. `test/run_live_serial_tests.ps1`
 
-Use `products/skr2-f429/validate-all.ps1` to exercise the operator-facing wrapper flow in the preferred order: app build, BootAnchor build, USB app flash, then ST-Link app recovery.
+Use `products/skr2-f429/validate-all.ps1` to exercise the operator-facing wrapper flow in the preferred order: app build, BootAnchor build, USB app flash, BootAnchor transition validation, and runtime validation. Add `-IncludeRecovery` only when you explicitly want an ST-Link recovery pass.
 
 ## Reference Docs
 
