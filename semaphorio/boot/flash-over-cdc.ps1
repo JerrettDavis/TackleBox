@@ -11,5 +11,10 @@ param(
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $legacyTool = Join-Path $repoRoot 'tools\flash-over-cdc.ps1'
 
-& $legacyTool -PortName $PortName -AppPortName $AppPortName -FirmwarePath $FirmwarePath -ChunkBytes $ChunkBytes -EnterBootloader:$EnterBootloader -SkipBuild:$SkipBuild -SkipBoot:$SkipBoot
-exit $LASTEXITCODE
+try {
+	& $legacyTool -PortName $PortName -AppPortName $AppPortName -FirmwarePath $FirmwarePath -ChunkBytes $ChunkBytes -EnterBootloader:$EnterBootloader -SkipBuild:$SkipBuild -SkipBoot:$SkipBoot
+	exit 0
+}
+catch {
+	throw
+}

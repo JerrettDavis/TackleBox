@@ -23,16 +23,16 @@ if (-not $SkipUsbFlash) {
     $firmwarePath = Join-Path $repoRoot '.pio\build\skr2_f429_usb\firmware.bin'
     $appFlashTool = Join-Path $PSScriptRoot 'flash-app.ps1'
     & $appFlashTool -EnterBootloader -FirmwarePath $firmwarePath -SkipBuild -AppPortName $AppPortName
-    if ($LASTEXITCODE -ne 0) {
-        exit $LASTEXITCODE
+        if ($LASTEXITCODE -ne 0) {
+		exit $LASTEXITCODE
     }
 }
 
 if (-not $SkipRecovery) {
     $recoverTool = Join-Path $PSScriptRoot 'recover-app.ps1'
     & $recoverTool
-    if ($LASTEXITCODE -ne 0) {
-        exit $LASTEXITCODE
+        if ($LASTEXITCODE -ne 0) {
+		exit $LASTEXITCODE
     }
 }
 

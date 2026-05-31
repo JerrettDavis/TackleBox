@@ -11,5 +11,10 @@ param(
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $tool = Join-Path $repoRoot 'semaphorio\boot\flash-over-cdc.ps1'
 
-& $tool -PortName $PortName -AppPortName $AppPortName -FirmwarePath $FirmwarePath -ChunkBytes $ChunkBytes -EnterBootloader:$EnterBootloader -SkipBuild:$SkipBuild -SkipBoot:$SkipBoot
-exit $LASTEXITCODE
+try {
+	& $tool -PortName $PortName -AppPortName $AppPortName -FirmwarePath $FirmwarePath -ChunkBytes $ChunkBytes -EnterBootloader:$EnterBootloader -SkipBuild:$SkipBuild -SkipBoot:$SkipBoot
+	exit 0
+}
+catch {
+	throw
+}
